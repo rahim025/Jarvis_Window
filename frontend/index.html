@@ -1,1 +1,205 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>J.A.R.V.I.S</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- ══ TIMER OVERLAY — Iron Man Style ═══════════════════════════════ -->
+    <div id="timer-hud" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%, -50%);z-index:200;text-align:center;pointer-events:none;">
+      <div style="font-family:'Courier New',monospace;color:#00e5ff;font-size:120px;font-weight:900;text-shadow:0 0 30px rgba(0,229,255,0.8);letter-spacing:10px;" id="timer-display">00:00</div>
+      <div style="font-family:'Courier New',monospace;color:rgba(0,229,255,0.5);font-size:14px;letter-spacing:5px;text-transform:uppercase;margin-top:-20px;">Protocol Minuteur Actif</div>
+      <div style="width:300px;height:2px;background:rgba(0,229,255,0.2);margin:20px auto;position:relative;overflow:hidden;">
+        <div id="timer-progress" style="position:absolute;top:0;left:0;height:100%;width:0%;background:#00e5ff;box-shadow:0 0 10px #00e5ff;"></div>
+      </div>
+    </div>
 
+    <!-- ══ HELP OVERLAY — Iron Man Style ═══════════════════════════════ -->
+    <div id="help-overlay" style="display:none;position:fixed;inset:0;z-index:90;pointer-events:none;">
+      <!-- Widgets will be injected here by JS -->
+    </div>
+
+    <style>
+      .help-widget {
+        position: absolute;
+        background: rgba(0, 229, 255, 0.05);
+        border-left: 2px solid #00e5ff;
+        padding: 15px 20px;
+        color: #00e5ff;
+        font-family: 'Courier New', monospace;
+        backdrop-filter: blur(5px);
+        box-shadow: 0 0 20px rgba(0, 229, 255, 0.1);
+        border-radius: 0 4px 4px 0;
+        opacity: 0;
+        transform: translateX(-20px);
+        transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+        max-width: 350px;
+        padding: 22px 30px;
+        color: #00e5ff;
+        font-family: 'Courier New', monospace;
+        backdrop-filter: blur(10px);
+        box-shadow: 0 0 30px rgba(0, 229, 255, 0.2), inset 0 0 10px rgba(0, 229, 255, 0.1);
+        border-radius: 4px;
+        opacity: 0;
+        transform: scale(0.8) translateY(20px);
+        transition: all 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+        pointer-events: auto;
+      }
+      .help-widget.right {
+        border-left: none;
+        border-right: 4px solid #00e5ff;
+      }
+      .help-widget.visible {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+      }
+      .help-widget-title {
+        font-size: 12px;
+        font-weight: bold;
+        letter-spacing: 3px;
+        opacity: 0.8;
+        margin-bottom: 8px;
+        text-transform: uppercase;
+        border-bottom: 1px solid rgba(0, 229, 255, 0.2);
+        padding-bottom: 5px;
+      }
+      .help-widget-cmd {
+        font-size: 18px;
+        font-weight: 900;
+        letter-spacing: 1px;
+        text-shadow: 0 0 10px rgba(0, 229, 255, 0.5);
+      }
+      @keyframes float {
+        0%, 100% { transform: translateY(0px); }
+        50% { transform: translateY(-10px); }
+      }
+    </style>
+
+    <script type="module" src="/src/main.ts"></script>
+  </head>
+  <body>
+    <canvas id="orb-canvas"></canvas>
+    <div id="status-text"></div>
+    <div id="user-tip" style="position:fixed;top:60px;left:20px;z-index:80;color:rgba(0,229,255,0.8);font-family:'Courier New',monospace;font-size:14px;font-weight:bold;letter-spacing:1px;pointer-events:none;background:rgba(0,229,255,0.1);padding:10px 20px;border-left:3px solid #00e5ff;border-radius:0 4px 4px 0;box-shadow:0 0 15px rgba(0,229,255,0.2);text-transform:uppercase;transition:opacity 1s ease-in-out;">
+      Demandez : "Jarvis, que peux-tu faire ?"
+    </div>
+    <div id="error-text"></div>
+    <div id="connection-badge" class="disconnected">
+      <div id="connection-dot"></div>
+      <span id="connection-label">reconnexion</span>
+    </div>
+    <button id="mute-button" aria-pressed="false">mute</button>
+    <button id="gpu-button" aria-pressed="true">GPU BOOST</button>
+    <button id="subtitle-toggle" aria-pressed="true">HUD TEXT</button>
+    <button id="keyboard-toggle" aria-pressed="false">CLAVIER</button>
+    <div id="update-banner">SYSTEM_UPDATE_AVAILABLE</div>
+
+    <div id="assistant-label">J.A.R.V.I.S <span style="font-size:10px;opacity:0.5;margin-left:10px;font-weight:normal;">by www.techenclair.fr</span></div>
+    
+    <div id="keyboard-hud" style="display:none;position:fixed;bottom:220px;left:50%;transform:translateX(-50%);z-index:200;width:85%;max-width:600px;pointer-events:auto;">
+      <div style="background:rgba(5,5,8,0.85);border:1px solid #00e5ff;padding:15px;backdrop-filter:blur(15px);border-radius:4px;box-shadow:0 0 30px rgba(0,229,255,0.2);">
+        <div style="display:flex;justify-content:space-between;margin-bottom:10px;font-family:'Courier New',monospace;color:#00e5ff;font-size:10px;letter-spacing:2px;text-transform:uppercase;">
+          <span>DIRECT_INPUT_OVERRIDE</span>
+          <span>AWAITING_COMMAND...</span>
+        </div>
+        <input type="text" id="keyboard-input" placeholder="ENTREZ VOTRE COMMANDE ICI..." style="width:100%;background:rgba(0,229,255,0.05);border:none;border-bottom:2px solid rgba(0,229,255,0.3);padding:10px;color:#00e5ff;font-family:'Courier New',monospace;font-size:16px;outline:none;letter-spacing:1px;text-transform:uppercase;">
+      </div>
+    </div>
+
+    <div id="subtitle-hud" style="display:none;position:fixed;bottom:100px;left:50%;transform:translateX(-50%);z-index:150;text-align:center;pointer-events:none;width:85%;max-width:900px;">
+      <div id="subtitle-box" style="background:rgba(0,229,255,0.03);border-top:1px solid rgba(0,229,255,0.15);border-bottom:1px solid rgba(0,229,255,0.15);padding:20px;backdrop-filter:blur(10px);position:relative;overflow:hidden;border-radius:4px;box-shadow:0 0 30px rgba(0,0,0,0.5);">
+        <div style="position:absolute;top:0;left:0;width:100%;height:100%;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,229,255,0.02) 2px,rgba(0,229,255,0.02) 4px);pointer-events:none;"></div>
+        <div style="position:absolute;top:0;left:0;width:30px;height:2px;background:#00e5ff;"></div>
+        <div style="position:absolute;top:0;right:0;width:30px;height:2px;background:#00e5ff;"></div>
+        <div style="position:absolute;bottom:0;left:0;width:30px;height:2px;background:#00e5ff;"></div>
+        <div style="position:absolute;bottom:0;right:0;width:30px;height:2px;background:#00e5ff;"></div>
+        <div id="subtitle-text" style="font-family:'Courier New',monospace;color:#00e5ff;font-size:18px;font-weight:bold;text-shadow:0 0 10px rgba(0,229,255,0.5);letter-spacing:1px;line-height:1.4;text-transform:uppercase;display:inline;"></div>
+        <div id="subtitle-cursor" style="display:inline-block;width:10px;height:20px;background:#00e5ff;vertical-align:middle;margin-left:5px;animation:blink 0.8s infinite;"></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-top:8px;font-family:'Courier New',monospace;color:rgba(0,229,255,0.4);font-size:9px;letter-spacing:2px;text-transform:uppercase;padding:0 10px;">
+        <span>SYNC_TERMINAL_V2.5</span>
+        <span id="subtitle-meta">DECRYPTING_RESPONSE...</span>
+      </div>
+    </div>
+
+    <!-- ══ JARVIS GLOBE — Canvas 2D pur (aucune dépendance) ════════════ -->
+    <div id="globe-overlay" style="display:none;position:fixed;inset:0;z-index:100;background:#000;opacity:0;flex-direction:column;transition:opacity 0.8s ease-in-out;">
+      <canvas id="globe-canvas" style="position:absolute;inset:0;width:100%;height:100%;cursor:grab;display:block;"></canvas>
+      
+      <!-- Detailed Map Layer -->
+      <div id="map-overlay" style="display:none;position:absolute;inset:0;z-index:150;background:#000;opacity:0;transition:opacity 1s ease-in-out;">
+        <div id="map" style="width:100%;height:100%;"></div>
+        <button id="map-back" style="position:absolute;bottom:30px;left:50%;transform:translateX(-50%);z-index:160;background:rgba(0,229,255,.2);border:1px solid #00e5ff;color:#00e5ff;font-family:'Courier New',monospace;font-size:12px;letter-spacing:2px;padding:10px 25px;border-radius:4px;cursor:pointer;backdrop-filter:blur(5px);box-shadow:0 0 15px rgba(0,229,255,.3);">✕ RETOUR À L'ESPACE</button>
+      </div>
+
+      <div style="position:absolute;top:14px;left:20px;z-index:20;color:rgba(0,229,255,.7);font-family:'Courier New',monospace;font-size:11px;letter-spacing:2px;text-transform:uppercase;pointer-events:none;line-height:1.8;">
+        <div style="font-size:20px;font-weight:bold;letter-spacing:5px;margin-bottom:5px;">J.A.R.V.I.S</div>
+        <div style="font-size:10px;letter-spacing:3px;opacity:0.7;margin-bottom:10px;">SYSTÈME DE NAVIGATION</div>
+        <div style="font-size:9px;letter-spacing:1px;opacity:0.5;">by www.techenclair.fr</div>
+        <div style="font-size:9px;letter-spacing:1px;opacity:0.5;">TIKTOK : TECHENCLAIR</div>
+      </div>
+      <div style="position:absolute;top:14px;right:20px;text-align:right;z-index:20;color:rgba(0,229,255,.7);font-family:'Courier New',monospace;font-size:11px;letter-spacing:2px;text-transform:uppercase;pointer-events:none;line-height:1.8;">
+        <div id="globe-clock">--:--:--</div><div style="font-size:9px;opacity:.5">UTC</div>
+      </div>
+      <div style="position:absolute;bottom:24px;left:50%;transform:translateX(-50%);text-align:center;z-index:20;pointer-events:none;">
+        <div id="globe-target-label" style="color:rgba(0,229,255,.9);font-family:'Courier New',monospace;font-size:13px;letter-spacing:3px;text-transform:uppercase;text-shadow:0 0 10px rgba(0,229,255,.6);margin-bottom:4px;">GLOBE TERRESTRE</div>
+        <div id="globe-coords" style="color:rgba(0,229,255,.5);font-family:'Courier New',monospace;font-size:10px;letter-spacing:2px;"></div>
+      </div>
+      <div style="position:absolute;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,229,255,.012) 3px,rgba(0,229,255,.012) 4px);pointer-events:none;z-index:5;"></div>
+      <div style="position:absolute;top:8px;left:8px;width:20px;height:20px;border-top:2px solid #00e5ff;border-left:2px solid #00e5ff;opacity:.5;pointer-events:none;z-index:20;"></div>
+      <div style="position:absolute;top:8px;right:8px;width:20px;height:20px;border-top:2px solid #00e5ff;border-right:2px solid #00e5ff;opacity:.5;pointer-events:none;z-index:20;"></div>
+      <div style="position:absolute;bottom:8px;left:8px;width:20px;height:20px;border-bottom:2px solid #00e5ff;border-left:2px solid #00e5ff;opacity:.5;pointer-events:none;z-index:20;"></div>
+      <div style="position:absolute;bottom:8px;right:8px;width:20px;height:20px;border-bottom:2px solid #00e5ff;border-right:2px solid #00e5ff;opacity:.5;pointer-events:none;z-index:20;"></div>
+      <button id="globe-close" style="position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:30;background:rgba(0,229,255,.08);border:1px solid rgba(0,229,255,.35);color:rgba(0,229,255,.75);font-family:'Courier New',monospace;font-size:10px;letter-spacing:2px;padding:5px 18px;border-radius:2px;cursor:pointer;">✕ FERMER</button>
+    </div>
+
+    <script>
+      // The globe logic is now handled in src/globe.ts via Vite
+      document.getElementById('globe-close').addEventListener('click', () => {
+        if (window.jarvisGlobe) window.jarvisGlobe({ globe_action: 'hide' });
+      });
+
+      // Transition to detailed map
+      let leafletMap = null;
+
+      window.showDetailedMap = (lat, lon) => {
+        const mapOverlay = document.getElementById('map-overlay');
+        
+        mapOverlay.style.display = 'block';
+        setTimeout(() => {
+          mapOverlay.style.opacity = '1';
+          
+          if (!leafletMap) {
+            leafletMap = L.map('map', {
+              center: [lat, lon],
+              zoom: 5, // Continental view (like image 3)
+              zoomControl: false
+            });
+            
+            // Google Satellite Tiles (More reliable)
+            L.tileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
+              attribution: '&copy; Google'
+            }).addTo(leafletMap);
+          } else {
+            if (!isNaN(lat) && !isNaN(lon)) {
+              leafletMap.setView([lat, lon], 5);
+            }
+          }
+          
+          // Force resize after transition
+          setTimeout(() => leafletMap.invalidateSize(), 400);
+        }, 50);
+      };
+
+      document.getElementById('map-back').addEventListener('click', () => {
+        const mapOverlay = document.getElementById('map-overlay');
+        mapOverlay.style.opacity = '0';
+        setTimeout(() => {
+          mapOverlay.style.display = 'none';
+          if (window.resetGlobeTransition) window.resetGlobeTransition();
+        }, 1000);
+      });
+    </script>
+  </body>
+</html>
