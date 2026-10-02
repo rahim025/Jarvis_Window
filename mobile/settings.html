@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#050816" />
+<title>J.A.R.V.I.S — Clés API</title>
+<style>
+  :root { --bg:#050816; --card:rgba(255,255,255,.04); --line:rgba(76,168,232,.25); --cy:#4ca8e8; --txt:#e8f1ff; --dim:rgba(232,241,255,.55); --ok:#3ddc97; --ko:#ff6b6b; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:radial-gradient(ellipse at top,#0d1740,var(--bg) 60%); color:var(--txt); font-family:system-ui,-apple-system,Segoe UI,sans-serif; min-height:100vh; }
+  main { max-width:640px; margin:0 auto; padding:20px 16px 90px; }
+  h1 { font-size:18px; letter-spacing:3px; font-weight:600; margin:6px 0 4px; }
+  .sub { color:var(--dim); font-size:13px; margin-bottom:18px; line-height:1.5; }
+  a.back { color:var(--cy); text-decoration:none; font-size:13px; }
+  #status { display:inline-flex; gap:8px; align-items:center; font-size:12px; color:var(--dim); margin:10px 0 14px; }
+  #dot { width:9px; height:9px; border-radius:50%; background:var(--ko); }
+  #dot.on { background:var(--ok); box-shadow:0 0 8px var(--ok); }
+  .brains { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:16px; }
+  .chip { font-size:11px; padding:4px 10px; border-radius:999px; border:1px solid var(--line); color:var(--dim); }
+  .chip.on { color:var(--ok); border-color:var(--ok); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; margin-bottom:12px; }
+  .row { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px; }
+  label { font-size:14px; font-weight:600; }
+  .badge { font-size:11px; color:var(--ok); }
+  .badge.no { color:var(--dim); }
+  .inp { display:flex; gap:6px; }
+  input { flex:1; min-width:0; background:rgba(0,0,0,.35); border:1px solid var(--line); color:var(--txt); padding:11px 12px; border-radius:10px; font-size:14px; font-family:ui-monospace,Consolas,monospace; outline:none; }
+  input:focus { border-color:var(--cy); }
+  button { background:transparent; border:1px solid var(--line); color:var(--cy); border-radius:10px; padding:0 12px; font-size:12px; cursor:pointer; }
+  button.del { color:var(--ko); }
+  .get { display:inline-block; margin-top:8px; font-size:12px; color:var(--cy); text-decoration:none; opacity:.85; }
+  #bar { position:fixed; left:0; right:0; bottom:0; padding:12px 16px; background:linear-gradient(transparent,var(--bg) 40%); }
+  #save { display:block; width:100%; max-width:640px; margin:0 auto; padding:14px; border:none; border-radius:12px; background:var(--cy); color:#021022; font-size:15px; font-weight:700; letter-spacing:1px; }
+  #save:disabled { opacity:.4; }
+  #toast { position:fixed; top:14px; left:50%; transform:translateX(-50%); padding:10px 16px; border-radius:10px; background:#10224d; border:1px solid var(--cy); font-size:13px; opacity:0; transition:opacity .25s; pointer-events:none; z-index:9; }
+  #toast.show { opacity:1; }
+  #blocked { display:none; padding:16px; border:1px solid var(--ko); border-radius:12px; color:var(--ko); font-size:14px; line-height:1.5; }
+  .path { font-size:11px; color:var(--dim); margin-top:14px; word-break:break-all; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back" href="./">← Retour à JARVIS</a>
+  <h1>CLÉS API</h1>
+  <div class="sub">Colle tes clés ici : elles sont enregistrées sur ce PC et prises en compte tout de suite, sans redémarrer JARVIS.</div>
+  <div id="status"><span id="dot"></span><span id="statusTxt">connexion…</span></div>
+  <div class="brains" id="brains"></div>
+  <div id="blocked">Ce menu n'est disponible que depuis le PC où JARVIS tourne. Ouvre <b>http://localhost:8080/settings.html</b> sur ce PC (pas via l'adresse IP, ni depuis le téléphone).</div>
+  <div id="list"></div>
+  <div class="path" id="path"></div>
+</main>
+<div id="bar"><button id="save" disabled>ENREGISTRER</button></div>
+<div id="toast"></div>
+<script>
+const LIENS = {
+  GEMINI_API_KEY:"https://aistudio.google.com/apikey",
+  GROQ_API_KEY:"https://console.groq.com/keys",
+  XAI_API_KEY:"https://console.x.ai",
+  ANTHROPIC_API_KEY:"https://console.anthropic.com/settings/keys",
+  SERPAPI_API_KEY:"https://serpapi.com/manage-api-key",
+  YOUTUBE_API_KEY:"https://console.cloud.google.com/apis/credentials"
+};
+const $ = (id) => document.getElementById(id);
+let ws, retry, keys = [], efface = new Set();
+
+function toast(t){ const e=$("toast"); e.textContent=t; e.classList.add("show"); clearTimeout(e._t); e._t=setTimeout(()=>e.classList.remove("show"),2600); }
+
+function connect(){
+  ws = new WebSocket(`ws://${location.hostname || "localhost"}:8765`);
+  ws.onopen = () => { $("dot").classList.add("on"); $("statusTxt").textContent="connecté à JARVIS"; ws.send(JSON.stringify({type:"get_keys"})); };
+  ws.onclose = () => { $("dot").classList.remove("on"); $("statusTxt").textContent="JARVIS injoignable — lance-le sur le PC"; clearTimeout(retry); retry=setTimeout(connect,3000); };
+  ws.onmessage = (ev) => {
+    let d; try { d = JSON.parse(ev.data); } catch { return; }
+    if (d.action === "keys_state") {
+      if (d.error === "local_only") { $("blocked").style.display="block"; $("list").innerHTML=""; $("save").disabled=true; return; }
+      keys = d.keys; render(); brains(d.active); $("path").textContent = d.path ? "Fichier : " + d.path : "";
+    } else if (d.action === "keys_saved") {
+      if (d.ok) { keys = d.keys; efface.clear(); render(); brains(d.active); toast("Clés enregistrées ✓"); }
+      else toast("Erreur : " + (d.message || "échec"));
+      $("save").disabled = false;
+    }
+  };
+}
+
+function brains(a){
+  if(!a) return;
+  const noms = {gemini:"Gemini", groq:"Groq", grok:"Grok", claude:"Claude"};
+  $("brains").innerHTML = Object.keys(noms).map(k => `<span class="chip ${a[k]?"on":""}">${a[k]?"●":"○"} ${noms[k]}</span>`).join("");
+}
+
+function render(){
+  $("list").innerHTML = "";
+  keys.forEach(k => {
+    const c = document.createElement("div"); c.className="card";
+    const etat = efface.has(k.name) ? "sera effacée" : (k.set ? (k.secret ? "enregistrée · " + k.masked : "renseigné") : "non renseignée");
+    c.innerHTML = `<div class="row"><label for="f_${k.name}">${k.label}</label><span class="badge ${k.set&&!efface.has(k.name)?"":"no"}">${etat}</span></div>
+      <div class="inp"><input id="f_${k.name}" type="${k.secret?"password":"text"}" autocomplete="off" autocapitalize="off" spellcheck="false"
+        placeholder="${k.secret ? (k.set ? "Coller une nouvelle clé pour la remplacer" : "Coller la clé ici") : "Valeur"}" value="${k.secret ? "" : (k.value||"").replace(/"/g,"&quot;")}" data-orig="${k.secret ? "" : (k.value||"").replace(/"/g,"&quot;")}">
+        ${k.secret ? `<button type="button" data-show>Voir</button>` : ""}
+        ${k.set ? `<button type="button" class="del" data-del>Effacer</button>` : ""}</div>
+      ${LIENS[k.name] ? `<a class="get" href="${LIENS[k.name]}" target="_blank" rel="noopener">Obtenir une clé ↗</a>` : ""}`;
+    const inp = c.querySelector("input");
+    inp.addEventListener("input", maj);
+    const sh = c.querySelector("[data-show]"); if (sh) sh.onclick = () => { inp.type = inp.type==="password" ? "text":"password"; sh.textContent = inp.type==="password" ? "Voir":"Masquer"; };
+    const dl = c.querySelector("[data-del]"); if (dl) dl.onclick = () => { if (efface.has(k.name)) efface.delete(k.name); else efface.add(k.name); render(); maj(); };
+    $("list").appendChild(c);
+  });
+  maj();
+}
+
+function changements(){
+  const out = {};
+  keys.forEach(k => {
+    const inp = $("f_"+k.name); if (!inp) return;
+    const v = inp.value.trim();
+    if (efface.has(k.name)) out[k.name] = "";
+    else if (k.secret ? v !== "" : v !== (k.value||"")) out[k.name] = v;
+  });
+  return out;
+}
+function maj(){ $("save").disabled = Object.keys(changements()).length === 0; }
+
+$("save").onclick = () => {
+  const ch = changements();
+  if (!Object.keys(ch).length || !ws || ws.readyState !== 1) return;
+  $("save").disabled = true;
+  ws.send(JSON.stringify({type:"save_keys", keys: ch}));
+};
+connect();
+</script>
+</body>
+</html>
