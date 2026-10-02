@@ -1,0 +1,57 @@
+# ==========================================
+# J.A.R.V.I.S - Dependances Python (Windows 10/11)
+# Python 3.10 a 3.13 recommande
+# ==========================================
+
+# --- IA & LLM ---
+google-genai>=1.0.0
+google-generativeai>=0.8.0
+groq
+openai
+anthropic>=0.40.0
+
+# --- Google APIs (Gmail, Drive, Calendar, Sheets, Docs) ---
+google-auth>=2.0.0
+google-auth-oauthlib>=1.0.0
+google-auth-httplib2>=0.1.0
+google-api-python-client>=2.0.0
+
+# --- Web & Reseau ---
+flask
+flask-cors
+requests>=2.28.0
+websockets>=12.0
+aiohttp>=3.9.0
+httpx>=0.25.0
+
+# --- Audio & TTS ---
+SpeechRecognition>=3.10.0
+edge-tts>=6.0.0
+pyttsx3>=2.90
+pygame>=2.5.0
+PyAudio>=0.2.14
+
+# --- Controle Windows (volume, luminosite) ---
+pycaw
+comtypes
+screen-brightness-control
+
+# --- Vision & Interface ---
+pyautogui>=0.9.50
+Pillow>=10.0.0
+opencv-python
+screeninfo
+# Fenetre native (optionnel, peut echouer sur Python 3.13) :
+# pywebview>=4.0.0
+
+# --- Utilitaires ---
+python-dotenv
+colorama>=0.4.0
+tenacity>=8.0.0
+pyperclip>=1.8.0
+tabulate>=0.9.0
+tqdm>=4.60.0
+numpy>=1.24.0
+psutil>=5.9.0
+pydantic>=2.0.0
+packaging>=23.0
