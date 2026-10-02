@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>J.A.R.V.I.S — Mobile</title>
+    <link rel="stylesheet" href="style.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  </head>
+  <body>
+
+    <!-- Étoiles de fond -->
+    <div id="stars"></div>
+
+    <!-- Badge de connexion -->
+    <div id="connection-badge">
+      <span id="connection-dot"></span>
+      <span id="connection-label">connexion...</span>
+    </div>
+
+    <!-- Bouton pour stopper la parole -->
+    <button id="stop-jarvis-btn" aria-label="Stopper JARVIS">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z" fill="currentColor" fill-opacity="0.2"/>
+        <path d="M15 9H9V15H15V9Z" fill="currentColor"/>
+      </svg>
+      STOP
+    </button>
+
+    <!-- HTTPS Warning (si pas sécurisé et pas localhost) -->
+    <div id="https-warning" style="display: none; position: fixed; top: 0; width: 100%; background: #d32f2f; color: white; padding: 15px; text-align: center; z-index: 1000; font-family: sans-serif; font-size: 14px; box-shadow: 0 2px 10px rgba(0,0,0,0.5);">
+      <button id="close-warning-btn" style="position: absolute; right: 15px; top: 15px; background: none; border: none; color: white; font-size: 20px; font-weight: bold; cursor: pointer;">&times;</button>
+      <b>⚠️ Microphone bloqué par Chrome (HTTP)</b><br><br>
+      1. Tapez <b>chrome://flags</b> dans la barre d'adresse de ce navigateur.<br>
+      2. Cherchez <b>Insecure origins treated as secure</b>.<br>
+      3. Ajoutez l'adresse IP affichee sur votre PC (ex: http://192.168.1.XX:8080) et activez (Enable).<br>
+      4. Relancez le navigateur.
+    </div>
+
+    <!-- Contenu principal -->
+    <main id="app">
+
+      <!-- Orbe animé 3D -->
+      <div id="orb-container">
+        <canvas id="orb-canvas"></canvas>
+      </div>
+
+      <!-- Texte de statut -->
+      <div id="status-text">en attente</div>
+
+      <!-- Zone de transcription (ce que l'utilisateur a dit) -->
+      <div id="user-text" class="speech-bubble user-bubble"></div>
+
+      <!-- Zone de réponse JARVIS -->
+      <div id="jarvis-text" class="speech-bubble jarvis-bubble"></div>
+
+      <!-- Bouton microphone -->
+      <div id="mic-area">
+        <button id="mic-btn" aria-label="Parler à JARVIS">
+          <svg class="mic-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="9" y="2" width="6" height="12" rx="3" fill="currentColor"/>
+            <path d="M5 11a7 7 0 0 0 14 0" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            <line x1="12" y1="18" x2="12" y2="22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            <line x1="8" y1="22" x2="16" y2="22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          <svg class="stop-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:none">
+            <rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/>
+          </svg>
+        </button>
+        <div id="mic-label">APPUYER POUR PARLER</div>
+      </div>
+
+      <!-- Label bas de page -->
+      <div id="assistant-label">J.A.R.V.I.S</div>
+
+    </main>
+
+    <script src="orb.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
