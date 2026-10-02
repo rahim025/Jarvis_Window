@@ -1,1 +1,73 @@
+name: Construire JARVIS_Setup.exe
 
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:        # bouton "Run workflow" dans l'onglet Actions
+  release:
+    types: [published]      # attache l'installateur à la release
+
+permissions:
+  contents: write           # nécessaire pour publier dans une Release
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"     # PyAudio a des wheels Windows pour 3.12
+          cache: pip
+          cache-dependency-path: requirements_windows.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Dépendances Python
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements_windows.txt pyinstaller
+
+      - name: Compiler l'interface 3D
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: PyInstaller (JARVIS.exe)
+        run: pyinstaller jarvis.spec --noconfirm
+
+      - name: Installer Inno Setup si absent
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+
+      - name: Construire JARVIS_Setup.exe
+        shell: pwsh
+        run: |
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer.iss
+          if (-not (Test-Path installer_output\JARVIS_Setup.exe)) { throw "JARVIS_Setup.exe introuvable" }
+
+      - name: Artefact - installateur
+        uses: actions/upload-artifact@v4
+        with:
+          name: JARVIS_Setup
+          path: installer_output/JARVIS_Setup.exe
+
+      - name: Artefact - version portable (sans installation)
+        uses: actions/upload-artifact@v4
+        with:
+          name: JARVIS_Portable
+          path: dist/JARVIS
+
+      - name: Joindre à la Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: installer_output/JARVIS_Setup.exe
