@@ -7,6 +7,11 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>J.A.R.V.I.S — Mobile</title>
+    <link rel="manifest" href="manifest.json" />
+    <meta name="theme-color" content="#050816" />
+    <meta name="apple-mobile-web-app-title" content="JARVIS" />
+    <link rel="icon" href="icon-192.png" />
+    <link rel="apple-touch-icon" href="icon-192.png" />
     <link rel="stylesheet" href="style.css" />
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   </head>
@@ -80,5 +85,16 @@
 
     <script src="orb.js"></script>
     <script src="app.js"></script>
+      <script>
+      if ("serviceWorker" in navigator) {
+        window.addEventListener("load", () => {
+          navigator.serviceWorker.register("sw.js").catch(() => {});
+        });
+      }
+    </script>
+      <a id="settings-gear" href="settings.html" aria-label="Clés API" style="display:none;position:fixed;bottom:16px;right:16px;z-index:50;width:42px;height:42px;border-radius:50%;border:1px solid rgba(76,168,232,.3);background:rgba(5,8,22,.5);color:#4ca8e8;text-decoration:none;font-size:20px;line-height:42px;text-align:center;backdrop-filter:blur(8px);">⚙</a>
+    <script>
+      if (["localhost","127.0.0.1"].includes(location.hostname)) document.getElementById("settings-gear").style.display = "block";
+    </script>
   </body>
 </html>
