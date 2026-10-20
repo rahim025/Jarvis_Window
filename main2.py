@@ -259,7 +259,7 @@ except ImportError:
 CURRENT_VERSION = "4.0"
 UPDATE_JSON_URL = ""  # vérification de mise à jour désactivée
 DERNIERE_MAJ_INFO = None  # Stocke l'info si une MAJ est détectée
-_WEBVIEW_OK = _WEBVIEW_OK and os.getenv("JARVIS_FENETRE", "0") == "1"  # fenêtre native : JARVIS_FENETRE=1
+_WEBVIEW_OK = _WEBVIEW_OK and os.getenv("JARVIS_FENETRE", "1") == "1"  # fenêtre native activée par défaut (JARVIS_FENETRE=0 pour désactiver)
 
 
 # Chargement des variables d'environnement
@@ -286,6 +286,97 @@ _preparer_env()
 load_dotenv(os.path.join(DATA_DIR, ".env"))
 if not FROZEN:
     load_dotenv(os.path.join(os.path.dirname(RES_DIR), ".env"))
+
+# Clés API configurables depuis l'interface (menu Parametres)
+_CLES_API_CONFIGURABLES = [
+    "GEMINI_API_KEY", "YOUTUBE_API_KEY", "XAI_API_KEY", "SERPAPI_API_KEY",
+    "GROQ_API_KEY", "ANTHROPIC_API_KEY", "TIKTOK_USERNAME",
+    "SPOTIFY_MUSIQUE_URI", "YOUTUBE_MUSIQUE_URL",
+]
+
+def _chemin_env():
+    return os.path.join(DATA_DIR, ".env")
+
+_LABELS_CLES_API = {
+    "GEMINI_API_KEY": "Gemini",
+    "YOUTUBE_API_KEY": "YouTube",
+    "XAI_API_KEY": "Grok (xAI)",
+    "SERPAPI_API_KEY": "SerpAPI",
+    "GROQ_API_KEY": "Groq",
+    "ANTHROPIC_API_KEY": "Claude (Anthropic)",
+    "TIKTOK_USERNAME": "TikTok (pseudo)",
+    "SPOTIFY_MUSIQUE_URI": "Spotify (URI musique)",
+    "YOUTUBE_MUSIQUE_URL": "YouTube (URL musique)",
+}
+_CLES_SECRETES = {
+    "GEMINI_API_KEY", "YOUTUBE_API_KEY", "XAI_API_KEY", "SERPAPI_API_KEY",
+    "GROQ_API_KEY", "ANTHROPIC_API_KEY",
+}
+
+def _lire_env_brut():
+    actuel = {}
+    env_path = _chemin_env()
+    if os.path.exists(env_path):
+        with open(env_path, "r", encoding="utf-8") as f:
+            for ligne in f:
+                ligne = ligne.strip()
+                if not ligne or ligne.startswith("#") or "=" not in ligne:
+                    continue
+                cle, _, val = ligne.partition("=")
+                actuel[cle.strip()] = val.strip()
+    return actuel
+
+def _masquer(valeur):
+    if not valeur:
+        return ""
+    if len(valeur) <= 4:
+        return "••••"
+    return "••••" + valeur[-4:]
+
+def _etat_cles_api():
+    actuel = _lire_env_brut()
+    keys = []
+    for cle in _CLES_API_CONFIGURABLES:
+        val = actuel.get(cle, "")
+        secret = cle in _CLES_SECRETES
+        keys.append({
+            "name": cle,
+            "label": _LABELS_CLES_API.get(cle, cle),
+            "secret": secret,
+            "set": bool(val),
+            "masked": _masquer(val) if secret else "",
+            "value": "" if secret else val,
+        })
+    active = {
+        "gemini": _cle_valide(os.getenv("GEMINI_API_KEY")),
+        "groq": _cle_valide(os.getenv("GROQ_API_KEY")),
+        "grok": _cle_valide(os.getenv("XAI_API_KEY")),
+        "claude": _cle_valide(os.getenv("ANTHROPIC_API_KEY")),
+    }
+    return {"keys": keys, "active": active, "path": _chemin_env()}
+
+def _sauvegarder_cles_api(nouvelles_cles):
+    """Met a jour le fichier .env avec les cles recues depuis l'interface (valeur vide = effacee)."""
+    try:
+        env_path = _chemin_env()
+        actuel = _lire_env_brut()
+
+        for cle, valeur in nouvelles_cles.items():
+            if cle in _CLES_API_CONFIGURABLES:
+                actuel[cle] = str(valeur).strip()
+
+        with open(env_path, "w", encoding="utf-8") as f:
+            for cle in _CLES_API_CONFIGURABLES:
+                f.write(f"{cle}={actuel.get(cle, '')}\n")
+
+        for cle in _CLES_API_CONFIGURABLES:
+            os.environ[cle] = actuel.get(cle, "")
+
+        etat = _etat_cles_api()
+        return {"ok": True, "keys": etat["keys"], "active": etat["active"]}
+    except Exception as e:
+        print(f"[JARVIS] Erreur sauvegarde cles API : {e}")
+        return {"ok": False, "message": str(e)}
 
 def get_local_ip():
     import socket
@@ -352,12 +443,7 @@ from ha_config import (
 )
 
 gemini_actif    = _cle_valide(GEMINI_API_KEY)
-try:
-    client      = genai.Client(api_key=GEMINI_API_KEY)
-except Exception as _e_gemini:
-    client      = None
-    gemini_actif = False
-    print(f"[JARVIS] Gemini désactivé (clé absente ou invalide) : {_e_gemini}")
+client          = genai.Client(api_key=GEMINI_API_KEY)
 
 # Client Grok (xAI)
 grok_client     = None
@@ -373,146 +459,6 @@ if _cle_valide(GROQ_API_KEY):
 anthropic_client = None
 if _anthropic_lib and _cle_valide(ANTHROPIC_API_KEY):
     anthropic_client = _anthropic_lib.Anthropic(api_key=ANTHROPIC_API_KEY)
-
-# ════════════════════════════════════════════════════════
-#  MENU DES CLÉS API (enregistrées dans %APPDATA%\JARVIS\.env)
-# ════════════════════════════════════════════════════════
-# (variable, libellé, secret ?)
-CLES_GEREES = [
-    ("GEMINI_API_KEY",      "Gemini (Google)",           True),
-    ("GROQ_API_KEY",        "Groq (Llama 3.3)",          True),
-    ("XAI_API_KEY",         "Grok (xAI)",                True),
-    ("ANTHROPIC_API_KEY",   "Claude (Anthropic)",        True),
-    ("SERPAPI_API_KEY",     "SerpAPI (recherche web)",   True),
-    ("YOUTUBE_API_KEY",     "YouTube Data API",          True),
-    ("TIKTOK_USERNAME",     "Nom d'utilisateur TikTok",  False),
-    ("SPOTIFY_MUSIQUE_URI", "Spotify : URI de la playlist", False),
-    ("YOUTUBE_MUSIQUE_URL", "YouTube : lien de la musique", False),
-]
-_CLES_NOMS = {c[0] for c in CLES_GEREES}
-
-
-def _masquer_cle(valeur):
-    v = (valeur or "").strip()
-    if not v:
-        return ""
-    return (v[:4] + "…" + v[-4:]) if len(v) > 12 else "••••••"
-
-
-def etat_cles():
-    """État des clés pour l'interface : jamais la valeur complète d'un secret."""
-    res = []
-    for nom, label, secret in CLES_GEREES:
-        v = (os.getenv(nom) or "").strip()
-        ok = bool(v) and v not in _API_PLACEHOLDERS
-        res.append({
-            "name": nom, "label": label, "secret": secret, "set": ok,
-            "value": ("" if secret else v) if ok else "",
-            "masked": _masquer_cle(v) if (ok and secret) else "",
-        })
-    return res
-
-
-def _cerveaux_actifs():
-    return {"gemini": bool(gemini_actif), "groq": groq_client is not None,
-            "grok": grok_client is not None, "claude": anthropic_client is not None}
-
-
-def _recharger_clients():
-    """Relit les variables d'environnement et recrée les clients API à chaud."""
-    global GEMINI_API_KEY, YOUTUBE_API_KEY, XAI_API_KEY, SERPAPI_API_KEY, GROQ_API_KEY
-    global ANTHROPIC_API_KEY, SPOTIFY_MUSIQUE_URI, YOUTUBE_MUSIQUE_URL, TIKTOK_USERNAME
-    global gemini_actif, client, grok_client, groq_client, anthropic_client
-    GEMINI_API_KEY      = os.getenv("GEMINI_API_KEY")
-    YOUTUBE_API_KEY     = os.getenv("YOUTUBE_API_KEY")
-    XAI_API_KEY         = os.getenv("XAI_API_KEY")
-    SERPAPI_API_KEY     = os.getenv("SERPAPI_API_KEY")
-    GROQ_API_KEY        = os.getenv("GROQ_API_KEY")
-    ANTHROPIC_API_KEY   = os.getenv("ANTHROPIC_API_KEY")
-    SPOTIFY_MUSIQUE_URI = os.getenv("SPOTIFY_MUSIQUE_URI", "")
-    YOUTUBE_MUSIQUE_URL = os.getenv("YOUTUBE_MUSIQUE_URL", "")
-    TIKTOK_USERNAME     = os.getenv("TIKTOK_USERNAME", "").strip().lstrip("@")
-
-    gemini_actif = False
-    if _cle_valide(GEMINI_API_KEY):
-        try:
-            client = genai.Client(api_key=GEMINI_API_KEY)
-            gemini_actif = True
-        except Exception as e:
-            print(f"[CLES] Gemini : clé refusée ({e})")
-    grok_client = OpenAI(api_key=XAI_API_KEY, base_url="https://api.x.ai/v1") if _cle_valide(XAI_API_KEY) else None
-    groq_client = OpenAI(api_key=GROQ_API_KEY, base_url="https://api.groq.com/openai/v1") if _cle_valide(GROQ_API_KEY) else None
-    anthropic_client = None
-    if _anthropic_lib and _cle_valide(ANTHROPIC_API_KEY):
-        try:
-            anthropic_client = _anthropic_lib.Anthropic(api_key=ANTHROPIC_API_KEY)
-        except Exception as e:
-            print(f"[CLES] Claude : clé refusée ({e})")
-
-
-def enregistrer_cles(valeurs):
-    """Écrit les clés reçues dans le fichier .env de JARVIS puis recharge les clients.
-    Un champ absent est laissé intact ; une chaîne vide efface la clé."""
-    from dotenv import set_key
-    env_path = os.path.join(DATA_DIR, ".env")
-    os.makedirs(DATA_DIR, exist_ok=True)
-    if not os.path.exists(env_path):
-        open(env_path, "w", encoding="utf-8").close()
-    modifiees = []
-    for nom, val in (valeurs or {}).items():
-        if nom not in _CLES_NOMS or not isinstance(val, str):
-            continue
-        val = val.strip()
-        if any(c in val for c in "\r\n\"'"):
-            raise ValueError(f"Caractère interdit dans {nom}")
-        set_key(env_path, nom, val, quote_mode="never")
-        os.environ[nom] = val
-        modifiees.append(nom)
-    _recharger_clients()
-    print(f"[CLES] Enregistré : {', '.join(modifiees) or 'rien'}")
-    return modifiees
-
-
-def _ws_est_local(ws):
-    """Le menu des clés n'est accessible que depuis ce PC (pas depuis le Wi-Fi)."""
-    try:
-        ip = ws.remote_address[0]
-    except Exception:
-        return False
-    if ip not in ("127.0.0.1", "::1", "::ffff:127.0.0.1"):
-        return False
-    origin = None
-    try:
-        origin = ws.request.headers.get("Origin")
-    except Exception:
-        try:
-            origin = ws.request_headers.get("Origin")
-        except Exception:
-            origin = None
-    if origin and origin != "null":
-        from urllib.parse import urlparse
-        if urlparse(origin).hostname not in ("localhost", "127.0.0.1", "::1"):
-            return False
-    return True
-
-
-async def _gerer_msg_cles(ws, data):
-    if not _ws_est_local(ws):
-        await ws.send(json.dumps({"action": "keys_state", "error": "local_only"}))
-        print("[CLES] Accès refusé (client non local).")
-        return
-    if data.get("type") == "save_keys":
-        try:
-            enregistrer_cles(data.get("keys") or {})
-            await ws.send(json.dumps({"action": "keys_saved", "ok": True,
-                                      "keys": etat_cles(), "active": _cerveaux_actifs()}))
-        except Exception as e:
-            await ws.send(json.dumps({"action": "keys_saved", "ok": False, "message": str(e)}))
-    else:
-        await ws.send(json.dumps({"action": "keys_state", "keys": etat_cles(),
-                                  "active": _cerveaux_actifs(),
-                                  "path": os.path.join(DATA_DIR, ".env")}))
-
 
 MODELS_LIST     = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-1.5-flash", "gemini-2.5-pro", "gemini-2.0-flash-exp"]
 CHOSEN_MODEL    = MODELS_LIST[0]
@@ -961,8 +907,6 @@ async def ws_handler(websocket):
                     if texte:
                         print(f"[MOBILE] Commande recue : {texte}")
                         asyncio.ensure_future(traiter_reponse_ia(texte, mobile_ws=websocket))
-                elif data.get("type") in ("get_keys", "save_keys"):
-                    await _gerer_msg_cles(websocket, data)
                 elif data.get("type") == "stop_audio":
                     global STOP_PARLER
                     STOP_PARLER = True
@@ -981,6 +925,11 @@ async def ws_handler(websocket):
                         else:
                             fut.set_result(data["data"])
                     print(f"[VISION] Frame recue pour ID: {req_id}")
+                elif data.get("type") == "get_keys":
+                    await websocket.send(json.dumps({"action": "keys_state", **_etat_cles_api()}))
+                elif data.get("type") == "save_keys":
+                    resultat = _sauvegarder_cles_api(data.get("keys", {}))
+                    await websocket.send(json.dumps({"action": "keys_saved", **resultat}))
             except Exception as e:
                 print(f"[WEB] Erreur traitement message : {e}")
     except Exception:
@@ -1737,7 +1686,14 @@ async def jarvis_vision_cliquer(instruction):
             "{\"box\": [ymin, xmin, ymax, xmax], \"description\": \"description courte de l'élément\"}\n"
             "Les coordonnées sont normalisées de 0 à 1000 (0=coin haut-gauche, 1000=coin bas-droit)."
         )
-        response = client.models.generate_content(model=CHOSEN_MODEL, contents=[prompt_vision, img])
+        try:
+            response = await asyncio.wait_for(
+                asyncio.to_thread(client.models.generate_content, model=CHOSEN_MODEL, contents=[prompt_vision, img]),
+                timeout=15
+            )
+        except asyncio.TimeoutError:
+            print("[VISION] Timeout (15s) sur l'appel Gemini Vision")
+            return None
         rep_text = response.text.strip()
         print(f"[VISION] Gemini a renvoyé : {rep_text}")
         start = rep_text.find('{')
@@ -1793,7 +1749,14 @@ async def jarvis_vision_ecrire(instruction, texte_a_taper):
             "{\"box\": [ymin, xmin, ymax, xmax], \"description\": \"description du champ\"}\n"
             "Exemple : {\"box\": [250, 480, 290, 520], \"description\": \"champ de recherche Google\"}"
         )
-        response = client.models.generate_content(model=CHOSEN_MODEL, contents=[prompt_vision, img])
+        try:
+            response = await asyncio.wait_for(
+                asyncio.to_thread(client.models.generate_content, model=CHOSEN_MODEL, contents=[prompt_vision, img]),
+                timeout=15
+            )
+        except asyncio.TimeoutError:
+            print("[VISION] Timeout (15s) sur l'appel Gemini Vision")
+            return None
         rep_text = response.text.strip()
         start = rep_text.find('{')
         end = rep_text.rfind('}')
@@ -1849,7 +1812,14 @@ async def jarvis_vision_rechercher_sur_site(texte_recherche):
             "{\"box\": [ymin, xmin, ymax, xmax], \"description\": \"description de la barre trouvée\"}\n"
             "Exemple : {\"box\": [48, 220, 78, 820], \"description\": \"barre de recherche YouTube\"}"
         )
-        response = client.models.generate_content(model=CHOSEN_MODEL, contents=[prompt_vision, img])
+        try:
+            response = await asyncio.wait_for(
+                asyncio.to_thread(client.models.generate_content, model=CHOSEN_MODEL, contents=[prompt_vision, img]),
+                timeout=15
+            )
+        except asyncio.TimeoutError:
+            print("[VISION] Timeout (15s) sur l'appel Gemini Vision")
+            return None
         rep_text = response.text.strip()
         start = rep_text.find('{')
         end = rep_text.rfind('}')
@@ -1968,6 +1938,68 @@ async def jarvis_vision_navigateur(question_utilisateur=None):
     except Exception as e:
         print(f"[VISION NAVIGATEUR ERROR] {e}")
         return f"Désolé {USER_NAME}, une erreur est survenue lors de l'accès à la vision du navigateur : {e}"
+
+async def _sous_agent_web(query):
+    """Sous-agent : recherche web via SerpAPI (non bloquant)."""
+    try:
+        return await asyncio.wait_for(asyncio.to_thread(recherche_web_serpapi, query), timeout=12)
+    except asyncio.TimeoutError:
+        return None
+    except Exception as e:
+        print(f"[AGENT-WEB] Erreur : {e}")
+        return None
+
+async def _sous_agent_gemini_rapide(query):
+    """Sous-agent : reponse rapide Gemini avec recherche Google integree (sans historique de conversation)."""
+    if not gemini_actif:
+        return None
+    try:
+        response = await asyncio.wait_for(
+            asyncio.to_thread(
+                client.models.generate_content,
+                model=CHOSEN_MODEL,
+                contents=[types.Content(role="user", parts=[types.Part(text=
+                    f"Reponds de maniere concise et a jour (2026) a : {query}"
+                )])],
+                config=types.GenerateContentConfig(
+                    tools=[types.Tool(google_search=types.GoogleSearch())],
+                ),
+            ),
+            timeout=12
+        )
+        return response.text.strip()
+    except asyncio.TimeoutError:
+        return None
+    except Exception as e:
+        print(f"[AGENT-GEMINI] Erreur : {e}")
+        return None
+
+async def agent_recherche_parallele(query):
+    """
+    Agent principal qui delegue a plusieurs sous-agents en parallele (SerpAPI + Gemini)
+    pour repondre plus vite : on garde le premier resultat exploitable recu.
+    """
+    taches = [
+        asyncio.create_task(_sous_agent_web(query)),
+        asyncio.create_task(_sous_agent_gemini_rapide(query)),
+    ]
+    resultat = None
+    try:
+        for coro in asyncio.as_completed(taches, timeout=14):
+            try:
+                res = await coro
+            except Exception:
+                continue
+            if res:
+                resultat = res
+                break
+    except asyncio.TimeoutError:
+        pass
+    finally:
+        for t in taches:
+            if not t.done():
+                t.cancel()
+    return resultat or f"Je n'ai pas réussi à trouver d'information fiable sur {query} pour le moment."
 
 def recherche_web_serpapi(query):
     """Effectue une recherche sur Google via SerpAPI."""
@@ -2103,7 +2135,16 @@ def get_classement_football(ligue=None):
         print(f"[SPORT] Erreur classement : {e}")
         return f"Impossible de recuperer le classement : {e}"
 
+_sport_cache = {}
+_SPORT_CACHE_TTL = 300  # 5 minutes
+
 def get_resultats_sport_gemini(question_sport):
+    _k = question_sport.strip().lower()
+    _now = time.time()
+    if _k in _sport_cache:
+        _ts, _val = _sport_cache[_k]
+        if _now - _ts < _SPORT_CACHE_TTL:
+            return _val
     try:
         response = client.models.generate_content(
             model   = CHOSEN_MODEL,
@@ -2120,7 +2161,9 @@ def get_resultats_sport_gemini(question_sport):
                 )
             )
         )
-        return response.text.strip()
+        _val = response.text.strip()
+        _sport_cache[_k] = (time.time(), _val)
+        return _val
     except Exception as e:
         print(f"[SPORT] Erreur Gemini sport : {e}")
         return "Je n arrive pas a recuperer les resultats sportifs pour le moment."
@@ -4563,7 +4606,7 @@ async def traiter_reponse_ia(texte_utilisateur, mobile_ws=None):
             elif action == "recherche_web":
                 query = data.get("query", "")
                 await parler(f"Je lance une recherche sur internet pour {query}.")
-                result = recherche_web_serpapi(query)
+                result = await agent_recherche_parallele(query)
                 await parler(result)
             elif action == "sport_resultats":
                 equipe = data.get("equipe") or None
@@ -4585,7 +4628,10 @@ async def traiter_reponse_ia(texte_utilisateur, mobile_ws=None):
             elif action == "sport_live":
                 question = data.get("question", "derniers resultats sportifs 2026")
                 await parler("Je recherche les derniers resultats en direct, un instant {USER_NAME}.")
-                result = get_resultats_sport_gemini(question)
+                try:
+                    result = await asyncio.wait_for(asyncio.to_thread(get_resultats_sport_gemini, question), timeout=15)
+                except asyncio.TimeoutError:
+                    result = "La recherche sportive a pris trop de temps, reessaie dans un instant." 
                 await parler(result)
             elif action == "voir_ecran":
                 inst = data.get("instruction", "")
@@ -5250,6 +5296,7 @@ def main():
             x                = _win_x,
             y                = _win_y,
             resizable        = True,
+            fullscreen       = True,
             min_size         = (900, 600),
             background_color = "#0a0a0f",
             icon             = os.path.join(_trouver_dossier_projet("assets"), "jarvis.ico"),
