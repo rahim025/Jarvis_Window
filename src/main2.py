@@ -907,8 +907,51 @@ DERNIERE_MAJ_INFO = None
 EXPECTED_CONTEXT = None  # ex: "folder"
 EXPECTED_TIMESTAMP = 0   # temps pour expirer le contexte
 
+# --- CONTRÔLE PAR GESTES (webcam -> souris) : voir gesture_control.py ---
+_GESTES = None
+_GESTES_LOOP = None
+_GESTES_ENVOI_EN_COURS = False
+
+async def _diffuser_gestes(msg, est_image=False):
+    global _GESTES_ENVOI_EN_COURS
+    try:
+        if CONNECTED_CLIENTS:
+            await asyncio.gather(*[ws.send(msg) for ws in list(CONNECTED_CLIENTS)], return_exceptions=True)
+    finally:
+        if est_image:
+            _GESTES_ENVOI_EN_COURS = False
+
+def _gestes_emit(payload):
+    """Appelée depuis le thread des gestes : envoie un message à l'interface (thread-safe)."""
+    global _GESTES_ENVOI_EN_COURS
+    loop = _GESTES_LOOP
+    if loop is None or not CONNECTED_CLIENTS:
+        return
+    est_image = payload.get("action") == "gesture_frame"
+    if est_image:
+        if _GESTES_ENVOI_EN_COURS:
+            return  # on saute cette image si la précédente n'est pas encore partie
+        _GESTES_ENVOI_EN_COURS = True
+    try:
+        asyncio.run_coroutine_threadsafe(_diffuser_gestes(json.dumps(payload), est_image), loop)
+    except Exception:
+        if est_image:
+            _GESTES_ENVOI_EN_COURS = False
+
+def gestes_activer(actif):
+    """Démarre ou arrête le contrôle du PC par les gestes de la main."""
+    global _GESTES
+    if actif:
+        if _GESTES is None:
+            import gesture_control
+            _GESTES = gesture_control.GestureController(_gestes_emit, data_dir=DATA_DIR)
+        _GESTES.start()
+    elif _GESTES is not None:
+        _GESTES.stop(attendre=False)
+
 async def ws_handler(websocket):
-    global interface_deja_connectee
+    global interface_deja_connectee, _GESTES_LOOP
+    _GESTES_LOOP = asyncio.get_running_loop()
     CONNECTED_CLIENTS.add(websocket)
     interface_deja_connectee = True
     print(f"[WEB] Interface connectee (Clients actifs: {len(CONNECTED_CLIENTS)})")
@@ -938,6 +981,11 @@ async def ws_handler(websocket):
                     if texte:
                         print(f"[WEB] Commande clavier recue : {texte}")
                         asyncio.ensure_future(traiter_reponse_ia(texte))
+                elif data.get("type") == "gesture_control":
+                    if not _est_local(websocket):
+                        await websocket.send(json.dumps({"action": "gesture_status", "active": False, "error": "Réservé à l'ordinateur local."}))
+                    else:
+                        gestes_activer(bool(data.get("enable")))
                 elif data.get("type") == "screen_frame":
                     req_id = data.get("id")
                     if req_id in PENDING_SCREEN_CAPTURES:
@@ -964,6 +1012,8 @@ async def ws_handler(websocket):
         pass
     finally:
         CONNECTED_CLIENTS.discard(websocket)
+        if not CONNECTED_CLIENTS:
+            gestes_activer(False)  # plus d'interface = on libère la webcam et la souris
         print(f"[WEB] Interface deconnectee (Clients actifs: {len(CONNECTED_CLIENTS)})")
 
 async def send_web_state(state):
