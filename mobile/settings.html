@@ -47,6 +47,7 @@
   <div id="status"><span id="dot"></span><span id="statusTxt">connexion…</span></div>
   <div class="brains" id="brains"></div>
   <div id="blocked">Ce menu n'est disponible que depuis le PC où JARVIS tourne. Ouvre <b>http://localhost:8080/settings.html</b> sur ce PC (pas via l'adresse IP, ni depuis le téléphone).</div>
+  <div id="opts"></div>
   <div id="list"></div>
   <div class="path" id="path"></div>
 </main>
@@ -74,13 +75,24 @@ function connect(){
     let d; try { d = JSON.parse(ev.data); } catch { return; }
     if (d.action === "keys_state") {
       if (d.error === "local_only") { $("blocked").style.display="block"; $("list").innerHTML=""; $("save").disabled=true; return; }
-      keys = d.keys; render(); brains(d.active); $("path").textContent = d.path ? "Fichier : " + d.path : "";
+      keys = d.keys; render(); brains(d.active); renderOpts(d.options); $("path").textContent = d.path ? "Fichier : " + d.path : "";
+    } else if (d.action === "options_saved") {
+      if (d.ok) { renderOpts(d.options); toast("Option enregistrée ✓"); } else toast("Erreur : " + (d.message || "échec"));
     } else if (d.action === "keys_saved") {
-      if (d.ok) { keys = d.keys; efface.clear(); render(); brains(d.active); toast("Clés enregistrées ✓"); }
+      if (d.ok) { keys = d.keys; efface.clear(); render(); brains(d.active); renderOpts(d.options); toast("Clés enregistrées ✓"); }
       else toast("Erreur : " + (d.message || "échec"));
       $("save").disabled = false;
     }
   };
+}
+
+function renderOpts(o){
+  if(!o) return;
+  const on = !!o.clap_reveil;
+  $("opts").innerHTML = `<div class="card"><div class="row"><label for="o_clap">Réveil par double applaudissement</label>
+    <input id="o_clap" type="checkbox" ${on?"checked":""} style="flex:none;width:22px;height:22px;accent-color:var(--cy)"></div>
+    <div class="sub" style="margin:0">Tape deux fois dans tes mains pour réveiller JARVIS, sans dire « Jarvis ».</div></div>`;
+  $("o_clap").onchange = (e) => ws.send(JSON.stringify({type:"save_options", options:{clap_reveil:e.target.checked}}));
 }
 
 function brains(a){
