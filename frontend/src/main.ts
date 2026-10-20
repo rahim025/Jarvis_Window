@@ -34,6 +34,12 @@ const subtitleToggleButtonEl = document.getElementById("subtitle-toggle") as HTM
 const keyboardToggleButtonEl = document.getElementById("keyboard-toggle") as HTMLButtonElement;
 const keyboardHudEl = document.getElementById("keyboard-hud") as HTMLDivElement;
 const keyboardInputEl = document.getElementById("keyboard-input") as HTMLInputElement;
+const gestureToggleEl = document.getElementById("gesture-toggle") as HTMLButtonElement;
+const gesturePanelEl = document.getElementById("gesture-panel") as HTMLDivElement;
+const gesturePreviewEl = document.getElementById("gesture-preview") as HTMLImageElement;
+const gestureMsgEl = document.getElementById("gesture-msg") as HTMLDivElement;
+const gesturePoseEl = document.getElementById("gesture-pose") as HTMLSpanElement;
+let gestureEnabled = false;
 
 let subtitlesEnabled = true;
 let keyboardEnabled = false;
@@ -144,6 +150,12 @@ function connect(): void {
         type?: string;
         version?: string;
         url?: string;
+        active?: boolean;
+        error?: string;
+        message?: string;
+        label?: string;
+        pose?: string;
+        data?: string;
       };
 
       if (data.action === "request_screen_capture") {
@@ -160,6 +172,29 @@ function connect(): void {
             id: data.id,
             error: "no_stream",
           }));
+        }
+        return;
+      }
+
+      // ── Contrôle par gestes (aperçu webcam envoyé par le backend) ───
+      if (data.action === "gesture_frame" && typeof data.data === "string") {
+        if (!gestureEnabled) return;
+        gesturePreviewEl.src = `data:image/jpeg;base64,${data.data}`;
+        gestureMsgEl.classList.add("hidden");
+        gesturePoseEl.textContent = data.label || "";
+        return;
+      }
+      if (data.action === "gesture_status") {
+        if (data.active) {
+          if (data.message) showGestureMessage(data.message, false);
+        } else {
+          setGestureUI(false);
+          if (data.error) {
+            gesturePanelEl.style.display = "block";
+            showGestureMessage(data.error, true);
+            showError("Gestes : " + data.error);
+            setTimeout(() => { if (!gestureEnabled) gesturePanelEl.style.display = "none"; }, 8_000);
+          }
         }
         return;
       }
@@ -231,6 +266,7 @@ function connect(): void {
 
   ws.addEventListener("close", () => {
     setConnected(false);
+    setGestureUI(false);
     applyState("idle");
     scheduleReconnect();
   });
@@ -340,6 +376,37 @@ keyboardToggleButtonEl.addEventListener("click", () => {
   if (keyboardEnabled) {
     setTimeout(() => keyboardInputEl.focus(), 100);
   }
+});
+
+// ── Gestes ───────────────────────────────────────────────────────────────────
+function showGestureMessage(text: string, isError: boolean): void {
+  gestureMsgEl.textContent = text;
+  gestureMsgEl.classList.remove("hidden");
+  gestureMsgEl.classList.toggle("erreur", isError);
+}
+
+function setGestureUI(on: boolean): void {
+  gestureEnabled = on;
+  gestureToggleEl.setAttribute("aria-pressed", String(on));
+  gestureToggleEl.textContent = on ? "GESTES ON" : "GESTES";
+  if (on) {
+    gesturePanelEl.style.display = "block";
+    gesturePreviewEl.removeAttribute("src");
+    gesturePoseEl.textContent = "";
+    showGestureMessage("Démarrage de la caméra…", false);
+  } else {
+    gesturePanelEl.style.display = "none";
+  }
+}
+
+gestureToggleEl.addEventListener("click", () => {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    showError("Jarvis n'est pas connecté.");
+    return;
+  }
+  const next = !gestureEnabled;
+  setGestureUI(next);
+  ws.send(JSON.stringify({ type: "gesture_control", enable: next }));
 });
 
 keyboardInputEl.addEventListener("keydown", (e) => {
