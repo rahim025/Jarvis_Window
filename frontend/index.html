@@ -93,6 +93,21 @@
     <button id="gpu-button" aria-pressed="true">GPU BOOST</button>
     <button id="subtitle-toggle" aria-pressed="true">HUD TEXT</button>
     <button id="keyboard-toggle" aria-pressed="false">CLAVIER</button>
+    <button id="gesture-toggle" aria-pressed="false">GESTES</button>
+    <div id="gesture-panel" style="display:none">
+      <div class="gp-head"><span>CAMÉRA · GESTES</span><span id="gesture-pose">—</span></div>
+      <div class="gp-view">
+        <img id="gesture-preview" alt="Aperçu de la webcam" />
+        <div id="gesture-msg">Démarrage de la caméra…</div>
+      </div>
+      <ul class="gp-legend">
+        <li><b>☝️ Index levé</b> pointer</li>
+        <li><b>🤏 Pouce + index</b> clic · maintenu = glisser</li>
+        <li><b>🤏 Pouce + majeur</b> clic droit</li>
+        <li><b>✌️ Index + majeur</b> défiler (haut/bas/gauche/droite)</li>
+        <li><b>✋ Main ouverte</b> pause</li>
+      </ul>
+    </div>
     <a id="settings-link" href="http://localhost:8080/settings.html" target="_blank" rel="noopener" style="position:fixed;bottom:18px;left:18px;z-index:500;padding:8px 14px;border:1px solid rgba(76,168,232,.16);border-radius:999px;background:rgba(5,5,8,.34);color:rgba(255,255,255,.5);font-size:11px;letter-spacing:1.8px;text-transform:uppercase;text-decoration:none;backdrop-filter:blur(10px);">⚙ clés API</a>
     <div id="update-banner">SYSTEM_UPDATE_AVAILABLE</div>
 
