@@ -40,6 +40,8 @@ screen-brightness-control
 pyautogui>=0.9.50
 Pillow>=10.0.0
 opencv-python
+mediapipe>=0.10.9
+# (mediapipe = suivi des mains pour le contrôle par gestes)
 screeninfo
 # Fenetre native (optionnel, peut echouer sur Python 3.13) :
 # pywebview>=4.0.0

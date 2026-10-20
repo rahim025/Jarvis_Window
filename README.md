@@ -53,6 +53,26 @@ python main2.py
 - `jarvis_agent.py` réécrit (l'ancien appelait une méthode inexistante).
 - Vérification des mises à jour désactivée (elle pointait vers le serveur d'un autre auteur).
 
+## Contrôle du PC par les gestes de la main
+
+Cliquez sur le bouton **GESTES** (en haut de l'interface) : la webcam s'allume, un petit aperçu avec le
+squelette de votre main apparaît en haut de l'écran et la souris suit vos gestes. Re-cliquez pour arrêter.
+Au premier lancement, un petit modèle (~8 Mo) est téléchargé dans `%APPDATA%\JARVIS\models`
+(ou `src\models` en mode développement).
+
+| Geste | Action |
+|---|---|
+| ☝️ Index levé, autres doigts repliés | Pointer (le curseur suit le bout de l'index) |
+| 🤏 Pincer pouce + index, rapide | Clic gauche (2 fois = double clic) |
+| 🤏 Pincer pouce + index, maintenu, puis bouger la main | Glisser-déposer |
+| 🤏 Pincer pouce + majeur | Clic droit |
+| ✌️ Index + majeur levés, bouger la main haut / bas / gauche / droite | Défilement |
+| ✋ Main ouverte | Pause (rien ne bouge) |
+
+Conseils : main bien éclairée, paume vers la caméra, à 40-70 cm. Le cadre bleu de l'aperçu est la zone qui
+correspond à tout l'écran. Autre webcam : `JARVIS_CAMERA_INDEX=1` dans `.env`. Les réglages (sensibilité,
+vitesse de défilement, délai du glisser…) sont en haut de `src/gesture_control.py`.
+
 ## TikTok
 
 Mettez `TIKTOK_USERNAME=votre_pseudo` dans `src\\.env`, puis demandez « combien d'abonnés j'ai sur TikTok ».

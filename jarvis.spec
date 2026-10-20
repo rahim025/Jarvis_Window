@@ -8,7 +8,7 @@ datas, binaries, hiddenimports = [], [], []
 
 # paquets qui embarquent des fichiers/DLL/sous-modules chargés dynamiquement
 for pkg in ["speech_recognition", "edge_tts", "pyttsx3", "pycaw", "comtypes",
-            "certifi", "google.genai", "screen_brightness_control", "websockets"]:
+            "certifi", "google.genai", "screen_brightness_control", "websockets", "mediapipe"]:
     try:
         d, b, h = collect_all(pkg)
         datas += d
@@ -17,7 +17,7 @@ for pkg in ["speech_recognition", "edge_tts", "pyttsx3", "pycaw", "comtypes",
     except Exception as e:
         print(f"[SPEC] {pkg} ignore : {e}")
 
-hiddenimports += ["ha_config", "jarvis_agent", "pyaudio", "pygame", "cv2", "screeninfo", "psutil",
+hiddenimports += ["ha_config", "jarvis_agent", "gesture_control", "pyaudio", "pygame", "cv2", "screeninfo", "psutil",
                   "pyautogui", "pyperclip", "win32timezone"]
 
 # ressources embarquees (le frontend doit etre compile : cd frontend && npm install && npm run build)
