@@ -1,0 +1,17 @@
+FICHIERS MODIFIES / AJOUTES - a copier dans le dossier racine de Jarvis (Jarvis_Window-main)
+Les chemins du zip reproduisent le dossier : extrais-le DANS Jarvis_Window-main, en acceptant de remplacer.
+
+NOUVEAUX
+  src\fiches_import.py            lecture des fiches + ecriture Excel
+  src\word_import.py              photo manuscrite -> texte -> Word
+  mobile\fiches.html              page "import de fiches"
+  mobile\word.html                page "photo vers Word"
+
+MODIFIES
+  src\main2.py                    routes /api/fiches/* et /api/word/*, commandes vocales
+  frontend\index.html             boutons "import fiches" et "photo -> word"
+  requirements_windows.txt        + openpyxl, python-docx
+  jarvis.spec                     + modules pour l'exe
+  README.md                       explications
+
+APRES COPIE : lance INSTALLER_JARVIS.bat (installe openpyxl et python-docx), puis LANCER_JARVIS.bat.

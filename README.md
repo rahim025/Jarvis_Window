@@ -87,3 +87,32 @@ Mettez `TIKTOK_USERNAME=votre_pseudo` dans `src\\.env`, puis demandez « combien
 ## Sécurité
 
 Ne publiez jamais `src\.env` (déjà dans `.gitignore`).
+
+## Import de fiches (photos / PDF -> liste Excel)
+
+Jarvis lit des fiches d'inscription manuscrites (photos ou PDF) et remplit une liste Excel :
+Nom, Prénom(s), Sexe, Date de naissance, Lieu de naissance, Téléphone des parents, Nationalité, Npi.
+
+1. Lancez Jarvis, puis dites **« Jarvis, importe des fiches »** ou cliquez sur **📄 import fiches**
+   (ou ouvrez `http://localhost:8080/fiches.html`).
+2. (Facultatif) Choisissez votre fichier Excel et la feuille (la classe) : les nouvelles lignes sont
+   ajoutées à la suite, et les élèves déjà présents sont ignorés. Sinon un nouveau fichier est créé.
+3. Indiquez les valeurs identiques pour tous (par défaut `Nationalité=Beninoise`).
+4. Envoyez les photos / le PDF, cliquez **Lire les fiches**, corrigez si besoin (les cases jaunes sont
+   à vérifier : date impossible, numéro bizarre, écriture peu lisible...), puis **Télécharger l'Excel**.
+
+Nécessite `GEMINI_API_KEY` (la lecture se fait avec Gemini). Réservé à l'ordinateur où tourne Jarvis.
+Code : `src/fiches_import.py` (lecture + Excel) et routes `/api/fiches/*` dans `src/main2.py`.
+
+## Photo d'un texte manuscrit -> document Word
+
+Jarvis recopie un texte écrit à la main (photo ou PDF, une ou plusieurs pages) en document Word modifiable.
+
+1. Dites **« Jarvis, mets en Word »** / **« transcris »**, ou cliquez sur **📝 photo → word**
+   (ou ouvrez `http://localhost:8080/word.html`).
+2. Envoyez la ou les photos (réordonnables), cochez si besoin « Corriger l'orthographe », cliquez **Transcrire**.
+3. Corrigez le texte dans la zone d'édition (boutons Titre / Puce / Numéroté ; `[illisible]` marque ce qui n'a pas été lu).
+4. **Télécharger le Word** : fichier .docx normal, modifiable ensuite dans Word.
+
+Code : `src/word_import.py` et routes `/api/word/*` dans `src/main2.py`. Nécessite `GEMINI_API_KEY` et `python-docx`.
+
