@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#050816" />
+<title>J.A.R.V.I.S — Import de fiches</title>
+<style>
+  :root { --bg:#050816; --card:rgba(255,255,255,.04); --line:rgba(76,168,232,.25); --cy:#4ca8e8; --txt:#e8f1ff; --dim:rgba(232,241,255,.55); --ok:#3ddc97; --ko:#ff6b6b; --warn:#ffd166; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:radial-gradient(ellipse at top,#0d1740,var(--bg) 60%); color:var(--txt); font-family:system-ui,-apple-system,Segoe UI,sans-serif; min-height:100vh; }
+  main { max-width:1100px; margin:0 auto; padding:20px 16px 60px; }
+  h1 { font-size:18px; letter-spacing:3px; font-weight:600; margin:6px 0 4px; }
+  h2 { font-size:13px; letter-spacing:2px; font-weight:600; margin:0 0 10px; color:var(--cy); text-transform:uppercase; }
+  .sub { color:var(--dim); font-size:13px; margin-bottom:18px; line-height:1.5; }
+  a.back { color:var(--cy); text-decoration:none; font-size:13px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; margin-bottom:12px; }
+  label { display:block; font-size:13px; font-weight:600; margin:10px 0 4px; }
+  .hint { font-size:12px; color:var(--dim); margin-top:4px; line-height:1.4; }
+  input[type=text], textarea, select { width:100%; background:rgba(0,0,0,.35); border:1px solid var(--line); color:var(--txt); padding:10px 12px; border-radius:10px; font-size:14px; outline:none; font-family:inherit; }
+  textarea { min-height:60px; resize:vertical; }
+  input:focus, textarea:focus, select:focus { border-color:var(--cy); }
+  input[type=file] { width:100%; font-size:13px; color:var(--dim); }
+  button { background:transparent; border:1px solid var(--cy); color:var(--cy); border-radius:10px; padding:11px 16px; font-size:14px; cursor:pointer; }
+  button.main { background:var(--cy); color:#021022; border:none; font-weight:700; letter-spacing:1px; }
+  button:disabled { opacity:.4; cursor:default; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:12px; }
+  #status { font-size:13px; color:var(--dim); min-height:18px; }
+  #status.err { color:var(--ko); }
+  #bar { height:4px; background:rgba(255,255,255,.08); border-radius:4px; overflow:hidden; margin-top:8px; display:none; }
+  #bar div { height:100%; width:0; background:var(--cy); transition:width .3s; }
+  .tablewrap { overflow-x:auto; border:1px solid var(--line); border-radius:10px; }
+  table { border-collapse:collapse; width:100%; font-size:13px; }
+  th, td { border-bottom:1px solid var(--line); padding:0; text-align:left; }
+  th { background:rgba(76,168,232,.12); padding:8px 6px; font-weight:600; white-space:nowrap; }
+  td input { background:transparent; border:none; border-radius:0; padding:8px 6px; min-width:110px; font-size:13px; }
+  td.doubt input { background:rgba(255,209,102,.22); }
+  td.n { padding:0 8px; color:var(--dim); text-align:center; }
+  td.x button { border:none; color:var(--ko); padding:6px 10px; font-size:16px; }
+  .msg { font-size:12.5px; line-height:1.5; margin-top:8px; }
+  .msg.warn { color:var(--warn); } .msg.err { color:var(--ko); }
+  #resultat { display:none; }
+  .legend { display:inline-block; width:12px; height:12px; background:rgba(255,209,102,.5); border-radius:3px; vertical-align:-2px; margin-right:4px; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back" href="/">← JARVIS</a>
+  <h1>IMPORT DE FICHES</h1>
+  <div class="sub">Envoie des photos (ou un PDF) de fiches d'inscription : Jarvis lit l'écriture, remplit la liste (Nom, Prénom, Sexe, Date et lieu de naissance, Téléphone, Nationalité…) et te donne un fichier Excel. Ce que tu vois à l'écran reste modifiable avant de télécharger.</div>
+
+  <div class="card">
+    <h2>1 · Ta liste</h2>
+    <label for="xlsx">Fichier Excel existant (facultatif)</label>
+    <input type="file" id="xlsx" accept=".xlsx,.xlsm" />
+    <div class="hint">Si tu en choisis un, les nouvelles lignes sont ajoutées à la suite de la feuille choisie, avec ses colonnes, et les élèves déjà présents sont ignorés. Sinon, un nouveau fichier est créé.</div>
+    <div id="feuilleBloc" style="display:none">
+      <label for="feuille">Feuille (classe)</label>
+      <select id="feuille"></select>
+    </div>
+    <div id="colBloc">
+      <label for="colonnes">Colonnes (séparées par des virgules)</label>
+      <input type="text" id="colonnes" value="Nom, Prénom ( s ), Sexe, Date de naissance, Lieu de naissance, Téléphone de parents, Nationalité, Npi" />
+    </div>
+    <label for="fixes">Valeur identique pour tous les élèves</label>
+    <textarea id="fixes" rows="2">Nationalité=Beninoise</textarea>
+    <div class="hint">Une ligne par colonne, au format <b>Colonne=Valeur</b>. Ces colonnes ne sont pas lues sur les fiches.</div>
+    <label for="consignes">Consigne particulière (facultatif)</label>
+    <input type="text" id="consignes" placeholder="ex. : ne prends que le nom du père, ignore les professions" />
+  </div>
+
+  <div class="card">
+    <h2>2 · Les fiches</h2>
+    <input type="file" id="fichiers" accept="image/*,.pdf,.heic" multiple />
+    <div class="hint">Plusieurs photos à la fois, ou un PDF (une page par fiche, ou plusieurs fiches par page).</div>
+    <div class="row">
+      <button class="main" id="lire">LIRE LES FICHES</button>
+      <span id="status"></span>
+    </div>
+    <div id="bar"><div></div></div>
+  </div>
+
+  <div class="card" id="resultat">
+    <h2>3 · Résultat</h2>
+    <div class="hint"><span class="legend"></span>Case jaune = valeur à vérifier (survole-la pour voir pourquoi). Tu peux corriger directement dans le tableau.</div>
+    <div class="tablewrap" style="margin-top:10px"><table id="tbl"></table></div>
+    <div id="msgs"></div>
+    <div class="row">
+      <button class="main" id="telecharger">TÉLÉCHARGER L'EXCEL</button>
+      <button id="vider">Tout effacer</button>
+    </div>
+  </div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let colonnes = [], lignes = [], xlsxB64 = null, xlsxNom = "liste_eleves.xlsx", feuilleActive = null;
+
+const statut = (t, err) => { $("status").textContent = t; $("status").className = err ? "err" : ""; };
+const norm = (s) => (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+const lireB64 = (f) => new Promise((ok, ko) => { const r = new FileReader(); r.onload = () => ok(r.result.split(",")[1]); r.onerror = ko; r.readAsDataURL(f); });
+
+async function api(route, corps) {
+  const r = await fetch("/api/fiches/" + route, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corps) });
+  let j; try { j = await r.json(); } catch { throw new Error("Réponse illisible de Jarvis (est-il bien lancé ?)"); }
+  if (!r.ok || j.ok === false) throw new Error(j.message || ("Erreur " + r.status));
+  return j;
+}
+
+// Réduit les grosses photos (téléphone) pour un envoi rapide ; la lecture reste très bonne à 2200 px.
+async function preparer(f) {
+  const nom = f.name || "photo.jpg";
+  if (!f.type.startsWith("image/") || /heic|heif/i.test(f.type + nom)) return { nom, data: await lireB64(f) };
+  try {
+    const bmp = await createImageBitmap(f);
+    const k = Math.min(1, 2200 / Math.max(bmp.width, bmp.height));
+    const c = document.createElement("canvas"); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+    c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+    const blob = await new Promise((ok) => c.toBlob(ok, "image/jpeg", 0.88));
+    return { nom: nom.replace(/\.\w+$/, "") + ".jpg", data: await lireB64(blob) };
+  } catch { return { nom, data: await lireB64(f) }; }
+}
+
+$("xlsx").onchange = async (e) => {
+  const f = e.target.files[0];
+  xlsxB64 = null; $("feuilleBloc").style.display = "none"; $("colBloc").style.display = "";
+  if (!f) return;
+  try {
+    xlsxB64 = await lireB64(f); xlsxNom = f.name;
+    const j = await api("analyse", { xlsx: xlsxB64 });
+    const noms = Object.keys(j.feuilles);
+    if (!noms.length) throw new Error("Aucune feuille avec des colonnes trouvée.");
+    $("feuille").innerHTML = "";
+    noms.forEach((n) => { const o = document.createElement("option"); o.value = n; o.textContent = `${n} (${j.feuilles[n].lignes} élèves)`; $("feuille").appendChild(o); });
+    $("feuilleBloc").style.display = ""; $("colBloc").style.display = "none";
+    statut("Liste chargée : choisis la feuille (la classe).");
+  } catch (err) { xlsxB64 = null; e.target.value = ""; statut(err.message, true); }
+};
+
+function fixesDepuisTexte() {
+  const o = {};
+  $("fixes").value.split("\n").forEach((l) => { const i = l.indexOf("="); if (i > 0 && l.slice(i + 1).trim()) o[l.slice(0, i).trim()] = l.slice(i + 1).trim(); });
+  return o;
+}
+
+function cle(l) {
+  const g = (re) => { const c = colonnes.find((x) => re.test(norm(x))); return c ? norm(l.valeurs[c]) : ""; };
+  return [g(/^nom$/), g(/^prenom/), g(/date/)].join("|");
+}
+
+$("lire").onclick = async () => {
+  const fs = [...$("fichiers").files];
+  if (!fs.length) return statut("Choisis d'abord des photos ou un PDF.", true);
+  $("lire").disabled = true; $("bar").style.display = "block";
+  const msgs = { doublons: [], erreurs: [] };
+  const brut = xlsxB64 ? $("feuille").value : null; feuilleActive = brut;
+  const cols = xlsxB64 ? null : $("colonnes").value.split(",").map((s) => s.trim()).filter(Boolean);
+  lignes = []; colonnes = cols || [];
+  try {
+    const TAILLE = 4;  // fichiers par envoi
+    for (let i = 0; i < fs.length; i += TAILLE) {
+      const lot = fs.slice(i, i + TAILLE);
+      statut(`Lecture des fiches ${i + 1} à ${Math.min(i + TAILLE, fs.length)} sur ${fs.length}…`);
+      $("bar").firstElementChild.style.width = Math.round((i / fs.length) * 100) + "%";
+      const fichiers = []; for (const f of lot) fichiers.push(await preparer(f));
+      const j = await api("extraire", { fichiers, colonnes: cols, xlsx: xlsxB64, feuille: brut, fixes: fixesDepuisTexte(), consignes: $("consignes").value });
+      colonnes = j.colonnes;
+      for (const l of j.lignes) { if (lignes.some((x) => cle(x) === cle(l) && cle(l) !== "||")) msgs.doublons.push(l); else lignes.push(l); }
+      msgs.doublons.push(...j.doublons); msgs.erreurs.push(...j.erreurs);
+    }
+    $("bar").firstElementChild.style.width = "100%";
+    statut(`${lignes.length} fiche(s) lue(s).`);
+    afficher(msgs);
+  } catch (err) { statut(err.message, true); }
+  $("lire").disabled = false;
+};
+
+function afficher(msgs) {
+  const t = $("tbl"); t.innerHTML = "";
+  const hr = t.insertRow(); hr.appendChild(Object.assign(document.createElement("th"), { textContent: "#" }));
+  colonnes.forEach((c) => hr.appendChild(Object.assign(document.createElement("th"), { textContent: c })));
+  hr.appendChild(document.createElement("th"));
+  lignes.forEach((l, idx) => {
+    const tr = t.insertRow();
+    const n = tr.insertCell(); n.className = "n"; n.textContent = idx + 1;
+    colonnes.forEach((c) => {
+      const td = tr.insertCell(); const inp = document.createElement("input"); inp.type = "text"; inp.value = l.valeurs[c] || "";
+      if (l.doutes && l.doutes[c]) { td.className = "doubt"; inp.title = "À vérifier : " + l.doutes[c]; }
+      inp.oninput = () => { l.valeurs[c] = inp.value; if (l.doutes) delete l.doutes[c]; td.classList.remove("doubt"); };
+      td.appendChild(inp);
+    });
+    const x = tr.insertCell(); x.className = "x"; const b = document.createElement("button"); b.textContent = "✕"; b.title = "Retirer cette ligne";
+    b.onclick = () => { lignes.splice(idx, 1); afficher({ doublons: [], erreurs: [] }); }; x.appendChild(b);
+  });
+  const m = $("msgs"); m.innerHTML = "";
+  const ajoute = (cls, txt) => { const d = document.createElement("div"); d.className = "msg " + cls; d.textContent = txt; m.appendChild(d); };
+  if (msgs.doublons.length) ajoute("warn", `${msgs.doublons.length} fiche(s) ignorée(s) car déjà dans la liste : ` + msgs.doublons.map((l) => `${l.valeurs[colonnes[0]]} ${l.valeurs[colonnes[1]] || ""}`.trim()).join(", "));
+  msgs.erreurs.forEach((e) => ajoute("err", e));
+  $("resultat").style.display = "block";
+}
+
+$("telecharger").onclick = async () => {
+  if (!lignes.length) return statut("Rien à exporter.", true);
+  $("telecharger").disabled = true;
+  try {
+    const j = await api("exporter", { lignes, colonnes, xlsx: xlsxB64, feuille: feuilleActive });
+    const bin = atob(j.xlsx), u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([u8], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+    a.download = xlsxB64 ? xlsxNom : "liste_eleves.xlsx"; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    statut("Fichier téléchargé.");
+  } catch (err) { statut(err.message, true); }
+  $("telecharger").disabled = false;
+};
+
+$("vider").onclick = () => { lignes = []; $("resultat").style.display = "none"; $("tbl").innerHTML = ""; statut(""); $("bar").style.display = "none"; };
+</script>
+</body>
+</html>

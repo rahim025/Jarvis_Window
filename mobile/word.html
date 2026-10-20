@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#050816" />
+<title>J.A.R.V.I.S — Photo vers Word</title>
+<style>
+  :root { --bg:#050816; --card:rgba(255,255,255,.04); --line:rgba(76,168,232,.25); --cy:#4ca8e8; --txt:#e8f1ff; --dim:rgba(232,241,255,.55); --ok:#3ddc97; --ko:#ff6b6b; --warn:#ffd166; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:radial-gradient(ellipse at top,#0d1740,var(--bg) 60%); color:var(--txt); font-family:system-ui,-apple-system,Segoe UI,sans-serif; min-height:100vh; }
+  main { max-width:860px; margin:0 auto; padding:20px 16px 60px; }
+  h1 { font-size:18px; letter-spacing:3px; font-weight:600; margin:6px 0 4px; }
+  h2 { font-size:13px; letter-spacing:2px; font-weight:600; margin:0 0 10px; color:var(--cy); text-transform:uppercase; }
+  .sub { color:var(--dim); font-size:13px; margin-bottom:18px; line-height:1.5; }
+  a.back { color:var(--cy); text-decoration:none; font-size:13px; margin-right:14px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; margin-bottom:12px; }
+  label { display:block; font-size:13px; font-weight:600; margin:10px 0 4px; }
+  label.chk { display:flex; gap:8px; align-items:center; font-weight:400; margin:12px 0 0; }
+  .hint { font-size:12px; color:var(--dim); margin-top:4px; line-height:1.4; }
+  input[type=text], textarea { width:100%; background:rgba(0,0,0,.35); border:1px solid var(--line); color:var(--txt); padding:10px 12px; border-radius:10px; font-size:14px; outline:none; font-family:inherit; }
+  textarea#texte { min-height:340px; resize:vertical; font-size:15px; line-height:1.55; }
+  input:focus, textarea:focus { border-color:var(--cy); }
+  input[type=file] { width:100%; font-size:13px; color:var(--dim); }
+  button { background:transparent; border:1px solid var(--cy); color:var(--cy); border-radius:10px; padding:10px 14px; font-size:14px; cursor:pointer; }
+  button.main { background:var(--cy); color:#021022; border:none; font-weight:700; letter-spacing:1px; }
+  button.petit { padding:5px 10px; font-size:12px; }
+  button:disabled { opacity:.4; cursor:default; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:12px; }
+  #status { font-size:13px; color:var(--dim); min-height:18px; }
+  #status.err { color:var(--ko); }
+  #bar { height:4px; background:rgba(255,255,255,.08); border-radius:4px; overflow:hidden; margin-top:8px; display:none; }
+  #bar div { height:100%; width:0; background:var(--cy); transition:width .3s; }
+  #liste { list-style:none; padding:0; margin:10px 0 0; }
+  #liste li { display:flex; align-items:center; gap:8px; padding:6px 8px; border:1px solid var(--line); border-radius:10px; margin-bottom:6px; font-size:13px; }
+  #liste li span { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #liste img { width:38px; height:38px; object-fit:cover; border-radius:6px; }
+  .msg { font-size:12.5px; line-height:1.5; margin-top:8px; }
+  .msg.warn { color:var(--warn); } .msg.err { color:var(--ko); }
+  #resultat { display:none; }
+  .barre { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back" href="/">← JARVIS</a><a class="back" href="/fiches.html">Import de fiches →</a>
+  <h1>PHOTO VERS WORD</h1>
+  <div class="sub">Envoie la photo d'un texte écrit à la main (lettre, cours, compte rendu, liste…) : Jarvis le recopie en texte, tu corriges ce qui ne va pas, puis tu télécharges un vrai document Word que tu peux encore modifier.</div>
+
+  <div class="card">
+    <h2>1 · Les photos</h2>
+    <input type="file" id="fichiers" accept="image/*,.pdf,.heic" multiple />
+    <div class="hint">Plusieurs pages possibles : elles sont recopiées dans l'ordre de la liste ci-dessous (utilise ↑ ↓ pour changer l'ordre).</div>
+    <ul id="liste"></ul>
+    <label class="chk"><input type="checkbox" id="corriger" /> Corriger aussi l'orthographe et la ponctuation (sinon, je recopie exactement ce qui est écrit)</label>
+    <label class="chk"><input type="checkbox" id="suite" /> Ajouter à la suite du texte déjà présent (sinon, je remplace)</label>
+    <label for="consignes">Consigne particulière (facultatif)</label>
+    <input type="text" id="consignes" placeholder="ex. : c'est une lettre officielle ; ignore les notes dans la marge" />
+    <div class="row">
+      <button class="main" id="lire">TRANSCRIRE</button>
+      <span id="status"></span>
+    </div>
+    <div id="bar"><div></div></div>
+  </div>
+
+  <div class="card" id="resultat">
+    <h2>2 · Le texte — à corriger si besoin</h2>
+    <div class="barre">
+      <button class="petit" data-pre="# ">Titre</button>
+      <button class="petit" data-pre="## ">Sous-titre</button>
+      <button class="petit" data-pre="- ">Puce</button>
+      <button class="petit" data-pre="1. ">Numéroté</button>
+      <button class="petit" data-pre="">Enlever la mise en forme</button>
+    </div>
+    <textarea id="texte" spellcheck="true" lang="fr"></textarea>
+    <div class="hint">Mise en forme : <b># Titre</b>, <b>## Sous-titre</b>, <b>- puce</b>, <b>1. numéroté</b>. Une ligne vide = nouveau paragraphe. Les boutons ci-dessus s'appliquent à la ligne où se trouve le curseur. <b>[illisible]</b> marque ce que Jarvis n'a pas pu lire.</div>
+    <div id="msgs"></div>
+    <label for="titre">Nom du fichier</label>
+    <input type="text" id="titre" value="document" />
+    <div class="row">
+      <button class="main" id="telecharger">TÉLÉCHARGER LE WORD</button>
+      <button id="copier">Copier le texte</button>
+      <button id="vider">Tout effacer</button>
+    </div>
+  </div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let fichiers = [];  // [{file, url}]
+
+const statut = (t, err) => { $("status").textContent = t; $("status").className = err ? "err" : ""; };
+const lireB64 = (f) => new Promise((ok, ko) => { const r = new FileReader(); r.onload = () => ok(r.result.split(",")[1]); r.onerror = ko; r.readAsDataURL(f); });
+
+async function api(route, corps) {
+  const r = await fetch("/api/word/" + route, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corps) });
+  let j; try { j = await r.json(); } catch { throw new Error("Réponse illisible de Jarvis (est-il bien lancé ?)"); }
+  if (!r.ok || j.ok === false) throw new Error(j.message || ("Erreur " + r.status));
+  return j;
+}
+
+// Réduit les grosses photos (téléphone) : la lecture reste très bonne à 2400 px.
+async function preparer(f) {
+  const nom = f.name || "photo.jpg";
+  if (!f.type.startsWith("image/") || /heic|heif/i.test(f.type + nom)) return { nom, data: await lireB64(f) };
+  try {
+    const bmp = await createImageBitmap(f);
+    const k = Math.min(1, 2400 / Math.max(bmp.width, bmp.height));
+    const c = document.createElement("canvas"); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+    c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+    const blob = await new Promise((ok) => c.toBlob(ok, "image/jpeg", 0.9));
+    return { nom: nom.replace(/\.\w+$/, "") + ".jpg", data: await lireB64(blob) };
+  } catch { return { nom, data: await lireB64(f) }; }
+}
+
+function dessinerListe() {
+  const ul = $("liste"); ul.innerHTML = "";
+  fichiers.forEach((x, i) => {
+    const li = document.createElement("li");
+    if (x.file.type.startsWith("image/") && !/heic|heif/i.test(x.file.type + x.file.name)) { const im = document.createElement("img"); im.src = x.url; li.appendChild(im); }
+    const sp = document.createElement("span"); sp.textContent = `${i + 1}. ${x.file.name}`; li.appendChild(sp);
+    const mk = (txt, fn, off) => { const b = document.createElement("button"); b.className = "petit"; b.textContent = txt; b.disabled = !!off; b.onclick = fn; li.appendChild(b); };
+    mk("↑", () => { [fichiers[i - 1], fichiers[i]] = [fichiers[i], fichiers[i - 1]]; dessinerListe(); }, i === 0);
+    mk("↓", () => { [fichiers[i + 1], fichiers[i]] = [fichiers[i], fichiers[i + 1]]; dessinerListe(); }, i === fichiers.length - 1);
+    mk("✕", () => { URL.revokeObjectURL(x.url); fichiers.splice(i, 1); dessinerListe(); });
+    ul.appendChild(li);
+  });
+}
+
+$("fichiers").onchange = (e) => {
+  [...e.target.files].forEach((f) => fichiers.push({ file: f, url: URL.createObjectURL(f) }));
+  e.target.value = ""; dessinerListe();
+};
+
+$("lire").onclick = async () => {
+  if (!fichiers.length) return statut("Choisis d'abord une photo ou un PDF.", true);
+  $("lire").disabled = true; $("bar").style.display = "block";
+  const textes = [], doutes = [], erreurs = [];
+  try {
+    for (let i = 0; i < fichiers.length; i++) {
+      statut(`Lecture de la page ${i + 1} sur ${fichiers.length}…`);
+      $("bar").firstElementChild.style.width = Math.round((i / fichiers.length) * 100) + "%";
+      const f = await preparer(fichiers[i].file);
+      const j = await api("transcrire", { fichiers: [f], corriger: $("corriger").checked, consignes: $("consignes").value });
+      if (j.texte) textes.push(j.texte);
+      doutes.push(...j.doutes.map((d) => (fichiers.length > 1 ? `Page ${i + 1} — ` : "") + d)); erreurs.push(...j.erreurs);
+    }
+    $("bar").firstElementChild.style.width = "100%";
+    const nouveau = textes.join("\n\n");
+    if (nouveau) {
+      const avant = $("texte").value.trim();
+      $("texte").value = $("suite").checked && avant ? avant + "\n\n" + nouveau : nouveau;
+      statut("Texte prêt : relis-le et corrige si besoin.");
+    } else statut("Aucun texte trouvé.", true);
+    const m = $("msgs"); m.innerHTML = "";
+    const ajoute = (cls, txt) => { const d = document.createElement("div"); d.className = "msg " + cls; d.textContent = txt; m.appendChild(d); };
+    if (doutes.length) ajoute("warn", "À vérifier : " + doutes.join(" · "));
+    erreurs.forEach((e) => ajoute("err", e));
+    if (nouveau || $("texte").value) $("resultat").style.display = "block";
+  } catch (err) { statut(err.message, true); }
+  $("lire").disabled = false;
+};
+
+// Boutons de mise en forme : appliqués à la ligne du curseur
+document.querySelectorAll(".barre button").forEach((b) => b.onclick = () => {
+  const t = $("texte"), v = t.value, pos = t.selectionStart;
+  const debut = v.lastIndexOf("\n", pos - 1) + 1; let fin = v.indexOf("\n", pos); if (fin < 0) fin = v.length;
+  const ligne = v.slice(debut, fin).replace(/^\s*(#{1,3}\s+|[-•*]\s+|\d+[.)]\s+)/, "");
+  t.value = v.slice(0, debut) + b.dataset.pre + ligne + v.slice(fin);
+  t.focus(); t.selectionStart = t.selectionEnd = debut + b.dataset.pre.length + ligne.length;
+});
+
+$("telecharger").onclick = async () => {
+  if (!$("texte").value.trim()) return statut("Il n'y a pas de texte.", true);
+  $("telecharger").disabled = true;
+  try {
+    const nom = ($("titre").value.trim() || "document").replace(/[\\/:*?"<>|]+/g, "_");
+    const j = await api("exporter", { texte: $("texte").value, titre: nom });
+    const bin = atob(j.docx), u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([u8], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" }));
+    a.download = nom + ".docx"; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    statut("Document Word téléchargé.");
+  } catch (err) { statut(err.message, true); }
+  $("telecharger").disabled = false;
+};
+
+$("copier").onclick = async () => { try { await navigator.clipboard.writeText($("texte").value); statut("Texte copié."); } catch { $("texte").select(); document.execCommand("copy"); statut("Texte copié."); } };
+$("vider").onclick = () => { $("texte").value = ""; $("msgs").innerHTML = ""; $("resultat").style.display = "none"; statut(""); $("bar").style.display = "none"; };
+</script>
+</body>
+</html>
