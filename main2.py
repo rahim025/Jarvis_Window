@@ -308,6 +308,7 @@ _LABELS_CLES_API = {
     "SPOTIFY_MUSIQUE_URI": "Spotify (URI musique)",
     "YOUTUBE_MUSIQUE_URL": "YouTube (URL musique)",
 }
+_OPTIONS_ENV = ["JARVIS_CLAP_REVEIL"]
 _CLES_SECRETES = {
     "GEMINI_API_KEY", "YOUTUBE_API_KEY", "XAI_API_KEY", "SERPAPI_API_KEY",
     "GROQ_API_KEY", "ANTHROPIC_API_KEY",
@@ -333,6 +334,30 @@ def _masquer(valeur):
         return "••••"
     return "••••" + valeur[-4:]
 
+def _etat_options():
+    return {"clap_reveil": _lire_env_brut().get("JARVIS_CLAP_REVEIL", "0") == "1"}
+
+def _sauvegarder_options(opts):
+    try:
+        actuel = _lire_env_brut()
+        actuel["JARVIS_CLAP_REVEIL"] = "1" if opts.get("clap_reveil") else "0"
+        _ecrire_env(actuel)
+        os.environ["JARVIS_CLAP_REVEIL"] = actuel["JARVIS_CLAP_REVEIL"]
+        return {"ok": True, "options": _etat_options()}
+    except Exception as e:
+        return {"ok": False, "message": str(e)}
+
+def _ecrire_env(actuel):
+    with open(_chemin_env(), "w", encoding="utf-8") as f:
+        for cle in _CLES_API_CONFIGURABLES + _OPTIONS_ENV:
+            f.write(f"{cle}={actuel.get(cle, '')}\n")
+
+def _est_local(ws):
+    try:
+        return ws.remote_address[0] in ("127.0.0.1", "::1", "::ffff:127.0.0.1")
+    except Exception:
+        return False
+
 def _etat_cles_api():
     actuel = _lire_env_brut()
     keys = []
@@ -353,7 +378,7 @@ def _etat_cles_api():
         "grok": _cle_valide(os.getenv("XAI_API_KEY")),
         "claude": _cle_valide(os.getenv("ANTHROPIC_API_KEY")),
     }
-    return {"keys": keys, "active": active, "path": _chemin_env()}
+    return {"keys": keys, "active": active, "path": _chemin_env(), "options": _etat_options()}
 
 def _sauvegarder_cles_api(nouvelles_cles):
     """Met a jour le fichier .env avec les cles recues depuis l'interface (valeur vide = effacee)."""
@@ -365,15 +390,12 @@ def _sauvegarder_cles_api(nouvelles_cles):
             if cle in _CLES_API_CONFIGURABLES:
                 actuel[cle] = str(valeur).strip()
 
-        with open(env_path, "w", encoding="utf-8") as f:
-            for cle in _CLES_API_CONFIGURABLES:
-                f.write(f"{cle}={actuel.get(cle, '')}\n")
-
-        for cle in _CLES_API_CONFIGURABLES:
+        _ecrire_env(actuel)
+        for cle in _CLES_API_CONFIGURABLES + _OPTIONS_ENV:
             os.environ[cle] = actuel.get(cle, "")
 
         etat = _etat_cles_api()
-        return {"ok": True, "keys": etat["keys"], "active": etat["active"]}
+        return {"ok": True, "keys": etat["keys"], "active": etat["active"], "options": etat["options"]}
     except Exception as e:
         print(f"[JARVIS] Erreur sauvegarde cles API : {e}")
         return {"ok": False, "message": str(e)}
@@ -885,8 +907,51 @@ DERNIERE_MAJ_INFO = None
 EXPECTED_CONTEXT = None  # ex: "folder"
 EXPECTED_TIMESTAMP = 0   # temps pour expirer le contexte
 
+# --- CONTRÔLE PAR GESTES (webcam -> souris) : voir gesture_control.py ---
+_GESTES = None
+_GESTES_LOOP = None
+_GESTES_ENVOI_EN_COURS = False
+
+async def _diffuser_gestes(msg, est_image=False):
+    global _GESTES_ENVOI_EN_COURS
+    try:
+        if CONNECTED_CLIENTS:
+            await asyncio.gather(*[ws.send(msg) for ws in list(CONNECTED_CLIENTS)], return_exceptions=True)
+    finally:
+        if est_image:
+            _GESTES_ENVOI_EN_COURS = False
+
+def _gestes_emit(payload):
+    """Appelée depuis le thread des gestes : envoie un message à l'interface (thread-safe)."""
+    global _GESTES_ENVOI_EN_COURS
+    loop = _GESTES_LOOP
+    if loop is None or not CONNECTED_CLIENTS:
+        return
+    est_image = payload.get("action") == "gesture_frame"
+    if est_image:
+        if _GESTES_ENVOI_EN_COURS:
+            return  # on saute cette image si la précédente n'est pas encore partie
+        _GESTES_ENVOI_EN_COURS = True
+    try:
+        asyncio.run_coroutine_threadsafe(_diffuser_gestes(json.dumps(payload), est_image), loop)
+    except Exception:
+        if est_image:
+            _GESTES_ENVOI_EN_COURS = False
+
+def gestes_activer(actif):
+    """Démarre ou arrête le contrôle du PC par les gestes de la main."""
+    global _GESTES
+    if actif:
+        if _GESTES is None:
+            import gesture_control
+            _GESTES = gesture_control.GestureController(_gestes_emit, data_dir=DATA_DIR)
+        _GESTES.start()
+    elif _GESTES is not None:
+        _GESTES.stop(attendre=False)
+
 async def ws_handler(websocket):
-    global interface_deja_connectee
+    global interface_deja_connectee, _GESTES_LOOP
+    _GESTES_LOOP = asyncio.get_running_loop()
     CONNECTED_CLIENTS.add(websocket)
     interface_deja_connectee = True
     print(f"[WEB] Interface connectee (Clients actifs: {len(CONNECTED_CLIENTS)})")
@@ -916,6 +981,11 @@ async def ws_handler(websocket):
                     if texte:
                         print(f"[WEB] Commande clavier recue : {texte}")
                         asyncio.ensure_future(traiter_reponse_ia(texte))
+                elif data.get("type") == "gesture_control":
+                    if not _est_local(websocket):
+                        await websocket.send(json.dumps({"action": "gesture_status", "active": False, "error": "Réservé à l'ordinateur local."}))
+                    else:
+                        gestes_activer(bool(data.get("enable")))
                 elif data.get("type") == "screen_frame":
                     req_id = data.get("id")
                     if req_id in PENDING_SCREEN_CAPTURES:
@@ -925,17 +995,25 @@ async def ws_handler(websocket):
                         else:
                             fut.set_result(data["data"])
                     print(f"[VISION] Frame recue pour ID: {req_id}")
-                elif data.get("type") == "get_keys":
-                    await websocket.send(json.dumps({"action": "keys_state", **_etat_cles_api()}))
-                elif data.get("type") == "save_keys":
-                    resultat = _sauvegarder_cles_api(data.get("keys", {}))
-                    await websocket.send(json.dumps({"action": "keys_saved", **resultat}))
+                elif data.get("type") in ("get_keys", "save_keys", "save_options"):
+                    if not _est_local(websocket):
+                        await websocket.send(json.dumps({"action": "keys_state", "error": "local_only"}))
+                    elif data["type"] == "get_keys":
+                        await websocket.send(json.dumps({"action": "keys_state", **_etat_cles_api()}))
+                    elif data["type"] == "save_keys":
+                        resultat = _sauvegarder_cles_api(data.get("keys", {}))
+                        await websocket.send(json.dumps({"action": "keys_saved", **resultat}))
+                    else:
+                        resultat = _sauvegarder_options(data.get("options", {}))
+                        await websocket.send(json.dumps({"action": "options_saved", **resultat}))
             except Exception as e:
                 print(f"[WEB] Erreur traitement message : {e}")
     except Exception:
         pass
     finally:
         CONNECTED_CLIENTS.discard(websocket)
+        if not CONNECTED_CLIENTS:
+            gestes_activer(False)  # plus d'interface = on libère la webcam et la souris
         print(f"[WEB] Interface deconnectee (Clients actifs: {len(CONNECTED_CLIENTS)})")
 
 async def send_web_state(state):
@@ -1596,7 +1674,7 @@ def creer_google_doc(titre="Nouveau Document", contenu=""):
         if contenu:
             requests_body = [{"insertText": {"location": {"index": 1}, "text": contenu}}]
             service.documents().batchUpdate(documentId=doc_id, body={"requests": requests_body}).execute()
-        webbrowser.open(f"https://docs.google.com/document/d/{doc_id}/edit", encoding="utf-8")
+        webbrowser.open(f"https://docs.google.com/document/d/{doc_id}/edit")
         return f"Document {titre} cree et ouvert, {USER_NAME}."
     except Exception as e:
         return f"Erreur Google Docs : {e}"
@@ -1614,7 +1692,7 @@ def modifier_google_doc(contenu, doc_id=None):
         end_index = doc["body"]["content"][-1]["endIndex"] - 1
         requests_body = [{"insertText": {"location": {"index": end_index}, "text": "\n" + contenu}}]
         service.documents().batchUpdate(documentId=target_id, body={"requests": requests_body}).execute()
-        webbrowser.open(f"https://docs.google.com/document/d/{target_id}/edit", encoding="utf-8")
+        webbrowser.open(f"https://docs.google.com/document/d/{target_id}/edit")
         return f"Texte ajoute dans le document {dernier_doc_titre}."
     except Exception as e:
         return f"Erreur modification doc : {e}"
@@ -1663,7 +1741,7 @@ def creer_google_sheet(titre="Nouvelle Feuille"):
             return "Google Sheets non disponible."
         sheet    = service.spreadsheets().create(body={"properties": {"title": titre}}).execute()
         sheet_id = sheet["spreadsheetId"]
-        webbrowser.open(f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit", encoding="utf-8")
+        webbrowser.open(f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit")
         return f"Feuille {titre} creee et ouverte."
     except Exception as e:
         return f"Erreur Google Sheets : {e}"
@@ -2190,7 +2268,7 @@ def executer_action_pc(commande):
     if "met de la musique" in cmd or "mets de la musique" in cmd:
         if "youtube" in cmd:
             url = YOUTUBE_MUSIQUE_URL or "https://www.youtube.com/watch?v=Cr8K88UcO0s"
-            webbrowser.open(url, new=2, encoding="utf-8")
+            webbrowser.open(url, new=2)
             time.sleep(5)
             pyautogui.press('f')
             return "C'est parti {USER_NAME}, je lance votre musique sur YouTube."
@@ -2207,7 +2285,7 @@ def executer_action_pc(commande):
         if recherche:
             url = chercher_youtube(recherche)
             if url:
-                webbrowser.open(url, new=2, encoding="utf-8")
+                webbrowser.open(url, new=2)
                 time.sleep(5)
                 pyautogui.press('f')
                 return f"Je lance {recherche} sur YouTube."
@@ -3950,6 +4028,25 @@ async def resoudre_commandes_locales(texte):
     """Détecte et exécute les commandes locales (Spotify, dossiers, apps) sans IA."""
     t = texte.lower().strip()
 
+    # --- IMPORT DE FICHES (photos/PDF -> liste Excel) ---
+    if any(k in t for k in ["importe des fiches", "importer des fiches", "import de fiches", "import des fiches",
+                            "lis des fiches", "lire des fiches", "liste des élèves", "liste des eleves",
+                            "fais la liste des élèves", "fais la liste des eleves"]):
+        try:
+            webbrowser.open("http://localhost:8080/fiches.html")
+        except Exception:
+            pass
+        return "J'ouvre l'import de fiches. Envoyez vos photos ou votre PDF, et je vous prépare la liste."
+
+    # --- PHOTO MANUSCRITE -> WORD ---
+    if any(k in t for k in ["photo en word", "texte en word", "transcris", "transcrire", "mets en word",
+                            "mettre en word", "écriture en word", "ecriture en word", "manuscrit en word"]):
+        try:
+            webbrowser.open("http://localhost:8080/word.html")
+        except Exception:
+            pass
+        return "J'ouvre la transcription Word. Envoyez la photo de votre texte, je le mets en document modifiable."
+
     # --- TIKTOK : abonnés ---
     if ("tiktok" in t or "tik tok" in t) and any(k in t for k in ["abonn", "follower", "combien"]):
         return await reponse_tiktok()
@@ -4131,7 +4228,7 @@ async def resoudre_commandes_locales(texte):
     # YouTube music spécifique — doit être AVANT le check Spotify
     if any(k in t for k in ["musique sur youtube", "met de la musique sur youtube", "mets de la musique sur youtube"]):
         url = YOUTUBE_MUSIQUE_URL or "https://www.youtube.com/watch?v=Cr8K88UcO0s"
-        webbrowser.open(url, new=2, encoding="utf-8")
+        webbrowser.open(url, new=2)
         time.sleep(5)
         pyautogui.press('f')
         return "C'est parti {USER_NAME}, je lance votre musique sur YouTube."
@@ -4967,87 +5064,99 @@ def ecouter():
             print(f"Erreur écoute : {e}")
             time.sleep(1)
 
+def _rms_pcm16(data):
+    """RMS d'un buffer PCM 16 bits (remplace audioop, retire de Python 3.13)."""
+    from array import array
+    s = array("h")
+    s.frombytes(data[: len(data) - (len(data) % 2)])
+    if not s:
+        return 0
+    return int((sum(x * x for x in s) / len(s)) ** 0.5)
+
+def _reveil_par_clap():
+    global jarvis_actif, dernier_message
+    jarvis_actif = True
+    dernier_message = time.time()
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(parler("Oui {USER_NAME}, je vous écoute."))
+    except Exception as e:
+        print(f"[CLAP] Erreur reveil : {e}")
+    finally:
+        loop.close()
+
 def monitor_claps():
     if not pyaudio:
         print("[CLAP] PyAudio absent — detection des applaudissements desactivee.")
         return
     try:
-        import audioop
         p = pyaudio.PyAudio()
-        # On ouvre le flux
-        # Utiliser le même micro que la détection vocale
         cfg_clap = _charger_config()
         mic_idx_clap = cfg_clap.get("mic_device_index", None)
         open_kwargs = dict(format=pyaudio.paInt16, channels=1, rate=44100,
-                          input=True, frames_per_buffer=1024)
+                           input=True, frames_per_buffer=1024)
         if mic_idx_clap is not None:
             open_kwargs["input_device_index"] = mic_idx_clap
-        stream = p.open(**open_kwargs, encoding="utf-8")
-        print("[CLAP] Détection des applaudissements activée.")
-        
-        print("[CLAP] Détection des doubles applaudissements activée.")
-        
+        stream = p.open(**open_kwargs)
+        print("[CLAP] Detection des doubles applaudissements prete.")
+
         last_clap_time = 0
-        
+        recent = []  # bruit de fond recent (rms)
+
         while True:
             try:
                 data = stream.read(1024, exception_on_overflow=False)
-                rms  = audioop.rms(data, 2)
-                
-                # ON IGNORE LE CLAP UNIQUEMENT SI LE MODE IRON MAN EST ÉTEINT OU SI JARVIS PARLE
-                if not MODE_IRON_MAN or is_speaking or is_thinking:
+                rms = _rms_pcm16(data)
+                fond = (sum(recent) / len(recent)) if recent else 0
+                recent.append(rms)
+                if len(recent) > 20:
+                    recent.pop(0)
+
+                reveil_actif = os.getenv("JARVIS_CLAP_REVEIL", "0") == "1"
+                if is_speaking or is_thinking or not (MODE_IRON_MAN or reveil_actif):
                     last_clap_time = 0
                     continue
 
-                if rms > CLAP_THRESHOLD:
-                    current_time = time.time()
-                    diff = current_time - last_clap_time
-                    
-                    if 0.1 < diff < 0.8:
-                        global VIDEO_LANCEE
-                        print(f"\n[CLAP] !!! DOUBLE CLAP DÉTECTÉ !!!")
-                        entity_id = PIECES_LUMIERES.get("salon", "light.salon")
-                        
-                        # On vérifie l'état actuel
-                        etat_actuel = ha_get_etat(entity_id)
-                        
-                        if etat_actuel != "on":
-                            # ON ALLUME
-                            print(f"[CLAP] Action : ALLUMER")
-                            ha_lumiere(entity_id, "on")
-                            
-                            if not VIDEO_LANCEE:
-                                print(f"[CLAP] Lancement initial de la vidéo...")
-                                webbrowser.open("https://www.youtube.com/watch?v=KU5V5WZVcVE", encoding="utf-8")
-                                VIDEO_LANCEE = True
-                                def seq():
-                                    time.sleep(5)
-                                    pyautogui.press('f')
-                                threading.Thread(target=seq, daemon=True).start()
-                            else:
-                                print(f"[CLAP] Reprise de la vidéo (Play)...")
-                                pyautogui.press('k')
+                # Un clap = pic net, bien au-dessus du bruit de fond
+                if rms > CLAP_THRESHOLD and rms > fond * 4:
+                    now = time.time()
+                    diff = now - last_clap_time
+                    if 0.12 < diff < 0.8:
+                        print("[CLAP] Double clap detecte")
+                        last_clap_time = 0
+                        if MODE_IRON_MAN:
+                            _action_clap_iron_man()
                         else:
-                            # ON ÉTEINT
-                            print(f"[CLAP] Action : ÉTEINDRE")
-                            ha_lumiere(entity_id, "off")
-                            if VIDEO_LANCEE:
-                                print(f"[CLAP] Mise en pause de la vidéo...")
-                                pyautogui.press('k')
-                            
-                        # Gros debounce après une action réussie
-                        time.sleep(3.0)
-                        last_clap_time = 0 # Reset
+                            _reveil_par_clap()
+                        time.sleep(2.0)
+                        recent.clear()
                     else:
-                        # C'est peut-être le premier clap
-                        last_clap_time = current_time
-            except Exception as e:
-                # Si erreur de lecture (ex: micro débranché), on attend et on continue
+                        last_clap_time = now
+            except Exception:
                 time.sleep(0.5)
                 continue
-
     except Exception as e:
-        print(f"[CLAP] Erreur fatale détection claps : {e}")
+        print(f"[CLAP] Erreur fatale detection claps : {e}")
+
+def _action_clap_iron_man():
+    """Comportement historique du double clap en mode Iron Man (lumiere + video)."""
+    global VIDEO_LANCEE
+    entity_id = PIECES_LUMIERES.get("salon", "light.salon")
+    if ha_get_etat(entity_id) != "on":
+        ha_lumiere(entity_id, "on")
+        if not VIDEO_LANCEE:
+            webbrowser.open("https://www.youtube.com/watch?v=KU5V5WZVcVE")
+            VIDEO_LANCEE = True
+            def seq():
+                time.sleep(5)
+                pyautogui.press('f')
+            threading.Thread(target=seq, daemon=True).start()
+        else:
+            pyautogui.press('k')
+    else:
+        ha_lumiere(entity_id, "off")
+        if VIDEO_LANCEE:
+            pyautogui.press('k')
 
 def start_ia():
     threading.Thread(target=monitor_claps, daemon=True).start()
@@ -5136,6 +5245,65 @@ if pygame:
 else:
     print("[INFO] Pygame absent — demarrage sans audio TTS.")
 
+def _api_fiches(chemin, data):
+    """Routes /api/fiches/{analyse,extraire,exporter}. Appelé depuis le serveur HTTP (un thread par requête)."""
+    import fiches_import
+    fiches_import.configurer(client, types, MODELS_LIST)
+    b64 = lambda s: base64.b64decode(s.split(",", 1)[-1])
+
+    if chemin.endswith("/analyse"):  # lit un Excel modèle : feuilles, colonnes, nombre de lignes
+        info = fiches_import.lire_modele(b64(data["xlsx"]))
+        return {"ok": True, "feuilles": {k: {"colonnes": v["colonnes"], "lignes": v["lignes"]} for k, v in info.items()}}
+
+    if chemin.endswith("/extraire"):  # photos/PDF -> lignes
+        colonnes = data.get("colonnes") or fiches_import.COLONNES_DEFAUT
+        existants = []
+        if data.get("xlsx"):
+            info = fiches_import.lire_modele(b64(data["xlsx"]))
+            feuille = data.get("feuille")
+            if feuille in info:
+                colonnes = info[feuille]["colonnes"]
+                existants = info[feuille]["cles"]
+        fichiers = [(f["nom"], b64(f["data"])) for f in data.get("fichiers", [])]
+        if not fichiers:
+            return {"ok": False, "message": "Aucun fichier reçu."}
+        print(f"[FICHES] {len(fichiers)} fichier(s) à lire...")
+        res = fiches_import.extraire_fiches(
+            fichiers, colonnes, data.get("fixes") or {}, data.get("consignes", ""), existants,
+            progression=lambda i, n, nom: print(f"[FICHES] {i}/{n} : {nom}"))
+        print(f"[FICHES] {len(res['lignes'])} fiche(s) lue(s), {len(res['doublons'])} doublon(s), {len(res['erreurs'])} erreur(s).")
+        return {"ok": True, **res}
+
+    if chemin.endswith("/exporter"):  # lignes (éventuellement corrigées à l'écran) -> .xlsx
+        colonnes = data["colonnes"]
+        xlsx = b64(data["xlsx"]) if data.get("xlsx") else None
+        sortie = fiches_import.ecrire_xlsx(data["lignes"], colonnes, xlsx, data.get("feuille"))
+        return {"ok": True, "xlsx": base64.b64encode(sortie).decode("ascii")}
+
+    return {"ok": False, "message": "Route inconnue."}
+
+def _api_word(chemin, data):
+    """Routes /api/word/{transcrire,exporter} : photo manuscrite -> texte modifiable -> .docx."""
+    import fiches_import, word_import
+    fiches_import.configurer(client, types, MODELS_LIST)
+    b64 = lambda s: base64.b64decode(s.split(",", 1)[-1])
+
+    if chemin.endswith("/transcrire"):
+        fichiers = [(f["nom"], b64(f["data"])) for f in data.get("fichiers", [])]
+        if not fichiers:
+            return {"ok": False, "message": "Aucun fichier reçu."}
+        print(f"[WORD] {len(fichiers)} fichier(s) à transcrire...")
+        res = word_import.transcrire(fichiers, bool(data.get("corriger")), data.get("consignes", ""),
+                                     progression=lambda i, n, nom: print(f"[WORD] {i}/{n} : {nom}"))
+        print(f"[WORD] {len(res['texte'])} caractères, {len(res['doutes'])} doute(s), {len(res['erreurs'])} erreur(s).")
+        return {"ok": True, **res}
+
+    if chemin.endswith("/exporter"):
+        sortie = word_import.creer_docx(data.get("texte", ""), data.get("titre", ""))
+        return {"ok": True, "docx": base64.b64encode(sortie).decode("ascii")}
+
+    return {"ok": False, "message": "Route inconnue."}
+
 def start_mobile_http_server():
     """Serveur HTTP minimal pour servir l'interface mobile sur le port 8080."""
     import http.server
@@ -5148,7 +5316,31 @@ def start_mobile_http_server():
             super().__init__(*args, directory=mobile_dir, **kwargs)
         def log_message(self, format, *args):
             pass  # Silencieux
-    server = http.server.HTTPServer(("0.0.0.0", 8080), MobileHandler)
+
+        def _json(self, code, obj):
+            body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self):
+            # Import de fiches (photos/PDF -> Excel) : réservé à l'ordinateur local (consomme le quota Gemini)
+            if not (self.path.startswith("/api/fiches/") or self.path.startswith("/api/word/")):
+                return self._json(404, {"ok": False, "message": "Route inconnue."})
+            if self.client_address[0] not in ("127.0.0.1", "::1", "::ffff:127.0.0.1"):
+                return self._json(403, {"ok": False, "message": "Réservé à l'ordinateur où tourne Jarvis."})
+            try:
+                taille = int(self.headers.get("Content-Length", "0"))
+                if taille <= 0 or taille > 200 * 1024 * 1024:
+                    return self._json(413, {"ok": False, "message": "Envoi vide ou trop gros (200 Mo max)."})
+                data = json.loads(self.rfile.read(taille).decode("utf-8"))
+                self._json(200, (_api_word if self.path.startswith("/api/word/") else _api_fiches)(self.path, data))
+            except Exception as e:
+                print(f"[FICHES] Erreur : {e}")
+                self._json(500, {"ok": False, "message": str(e)})
+    server = http.server.ThreadingHTTPServer(("0.0.0.0", 8080), MobileHandler)
     print(f"[MOBILE] Serveur HTTP demarre sur http://{LOCAL_IP}:8080")
     server.serve_forever()
 
@@ -5326,7 +5518,7 @@ def main():
 def _ouvrir_dans_navigateur(url, frontend_process):
     print("[JARVIS] Ouverture dans le navigateur par defaut...")
     try:
-        webbrowser.open(url, encoding="utf-8")
+        webbrowser.open(url)
     except Exception:
         pass
 
