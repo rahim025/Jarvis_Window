@@ -259,7 +259,7 @@ except ImportError:
 CURRENT_VERSION = "4.0"
 UPDATE_JSON_URL = ""  # vérification de mise à jour désactivée
 DERNIERE_MAJ_INFO = None  # Stocke l'info si une MAJ est détectée
-_WEBVIEW_OK = _WEBVIEW_OK and os.getenv("JARVIS_FENETRE", "0") == "1"  # fenêtre native : JARVIS_FENETRE=1
+_WEBVIEW_OK = _WEBVIEW_OK and os.getenv("JARVIS_FENETRE", "1") == "1"  # fenêtre native activée par défaut (JARVIS_FENETRE=0 pour désactiver)
 
 
 # Chargement des variables d'environnement
@@ -286,6 +286,97 @@ _preparer_env()
 load_dotenv(os.path.join(DATA_DIR, ".env"))
 if not FROZEN:
     load_dotenv(os.path.join(os.path.dirname(RES_DIR), ".env"))
+
+# Clés API configurables depuis l'interface (menu Parametres)
+_CLES_API_CONFIGURABLES = [
+    "GEMINI_API_KEY", "YOUTUBE_API_KEY", "XAI_API_KEY", "SERPAPI_API_KEY",
+    "GROQ_API_KEY", "ANTHROPIC_API_KEY", "TIKTOK_USERNAME",
+    "SPOTIFY_MUSIQUE_URI", "YOUTUBE_MUSIQUE_URL",
+]
+
+def _chemin_env():
+    return os.path.join(DATA_DIR, ".env")
+
+_LABELS_CLES_API = {
+    "GEMINI_API_KEY": "Gemini",
+    "YOUTUBE_API_KEY": "YouTube",
+    "XAI_API_KEY": "Grok (xAI)",
+    "SERPAPI_API_KEY": "SerpAPI",
+    "GROQ_API_KEY": "Groq",
+    "ANTHROPIC_API_KEY": "Claude (Anthropic)",
+    "TIKTOK_USERNAME": "TikTok (pseudo)",
+    "SPOTIFY_MUSIQUE_URI": "Spotify (URI musique)",
+    "YOUTUBE_MUSIQUE_URL": "YouTube (URL musique)",
+}
+_CLES_SECRETES = {
+    "GEMINI_API_KEY", "YOUTUBE_API_KEY", "XAI_API_KEY", "SERPAPI_API_KEY",
+    "GROQ_API_KEY", "ANTHROPIC_API_KEY",
+}
+
+def _lire_env_brut():
+    actuel = {}
+    env_path = _chemin_env()
+    if os.path.exists(env_path):
+        with open(env_path, "r", encoding="utf-8") as f:
+            for ligne in f:
+                ligne = ligne.strip()
+                if not ligne or ligne.startswith("#") or "=" not in ligne:
+                    continue
+                cle, _, val = ligne.partition("=")
+                actuel[cle.strip()] = val.strip()
+    return actuel
+
+def _masquer(valeur):
+    if not valeur:
+        return ""
+    if len(valeur) <= 4:
+        return "••••"
+    return "••••" + valeur[-4:]
+
+def _etat_cles_api():
+    actuel = _lire_env_brut()
+    keys = []
+    for cle in _CLES_API_CONFIGURABLES:
+        val = actuel.get(cle, "")
+        secret = cle in _CLES_SECRETES
+        keys.append({
+            "name": cle,
+            "label": _LABELS_CLES_API.get(cle, cle),
+            "secret": secret,
+            "set": bool(val),
+            "masked": _masquer(val) if secret else "",
+            "value": "" if secret else val,
+        })
+    active = {
+        "gemini": _cle_valide(os.getenv("GEMINI_API_KEY")),
+        "groq": _cle_valide(os.getenv("GROQ_API_KEY")),
+        "grok": _cle_valide(os.getenv("XAI_API_KEY")),
+        "claude": _cle_valide(os.getenv("ANTHROPIC_API_KEY")),
+    }
+    return {"keys": keys, "active": active, "path": _chemin_env()}
+
+def _sauvegarder_cles_api(nouvelles_cles):
+    """Met a jour le fichier .env avec les cles recues depuis l'interface (valeur vide = effacee)."""
+    try:
+        env_path = _chemin_env()
+        actuel = _lire_env_brut()
+
+        for cle, valeur in nouvelles_cles.items():
+            if cle in _CLES_API_CONFIGURABLES:
+                actuel[cle] = str(valeur).strip()
+
+        with open(env_path, "w", encoding="utf-8") as f:
+            for cle in _CLES_API_CONFIGURABLES:
+                f.write(f"{cle}={actuel.get(cle, '')}\n")
+
+        for cle in _CLES_API_CONFIGURABLES:
+            os.environ[cle] = actuel.get(cle, "")
+
+        etat = _etat_cles_api()
+        return {"ok": True, "keys": etat["keys"], "active": etat["active"]}
+    except Exception as e:
+        print(f"[JARVIS] Erreur sauvegarde cles API : {e}")
+        return {"ok": False, "message": str(e)}
 
 def get_local_ip():
     import socket
@@ -834,6 +925,11 @@ async def ws_handler(websocket):
                         else:
                             fut.set_result(data["data"])
                     print(f"[VISION] Frame recue pour ID: {req_id}")
+                elif data.get("type") == "get_keys":
+                    await websocket.send(json.dumps({"action": "keys_state", **_etat_cles_api()}))
+                elif data.get("type") == "save_keys":
+                    resultat = _sauvegarder_cles_api(data.get("keys", {}))
+                    await websocket.send(json.dumps({"action": "keys_saved", **resultat}))
             except Exception as e:
                 print(f"[WEB] Erreur traitement message : {e}")
     except Exception:
@@ -1590,7 +1686,14 @@ async def jarvis_vision_cliquer(instruction):
             "{\"box\": [ymin, xmin, ymax, xmax], \"description\": \"description courte de l'élément\"}\n"
             "Les coordonnées sont normalisées de 0 à 1000 (0=coin haut-gauche, 1000=coin bas-droit)."
         )
-        response = client.models.generate_content(model=CHOSEN_MODEL, contents=[prompt_vision, img])
+        try:
+            response = await asyncio.wait_for(
+                asyncio.to_thread(client.models.generate_content, model=CHOSEN_MODEL, contents=[prompt_vision, img]),
+                timeout=15
+            )
+        except asyncio.TimeoutError:
+            print("[VISION] Timeout (15s) sur l'appel Gemini Vision")
+            return None
         rep_text = response.text.strip()
         print(f"[VISION] Gemini a renvoyé : {rep_text}")
         start = rep_text.find('{')
@@ -1646,7 +1749,14 @@ async def jarvis_vision_ecrire(instruction, texte_a_taper):
             "{\"box\": [ymin, xmin, ymax, xmax], \"description\": \"description du champ\"}\n"
             "Exemple : {\"box\": [250, 480, 290, 520], \"description\": \"champ de recherche Google\"}"
         )
-        response = client.models.generate_content(model=CHOSEN_MODEL, contents=[prompt_vision, img])
+        try:
+            response = await asyncio.wait_for(
+                asyncio.to_thread(client.models.generate_content, model=CHOSEN_MODEL, contents=[prompt_vision, img]),
+                timeout=15
+            )
+        except asyncio.TimeoutError:
+            print("[VISION] Timeout (15s) sur l'appel Gemini Vision")
+            return None
         rep_text = response.text.strip()
         start = rep_text.find('{')
         end = rep_text.rfind('}')
@@ -1702,7 +1812,14 @@ async def jarvis_vision_rechercher_sur_site(texte_recherche):
             "{\"box\": [ymin, xmin, ymax, xmax], \"description\": \"description de la barre trouvée\"}\n"
             "Exemple : {\"box\": [48, 220, 78, 820], \"description\": \"barre de recherche YouTube\"}"
         )
-        response = client.models.generate_content(model=CHOSEN_MODEL, contents=[prompt_vision, img])
+        try:
+            response = await asyncio.wait_for(
+                asyncio.to_thread(client.models.generate_content, model=CHOSEN_MODEL, contents=[prompt_vision, img]),
+                timeout=15
+            )
+        except asyncio.TimeoutError:
+            print("[VISION] Timeout (15s) sur l'appel Gemini Vision")
+            return None
         rep_text = response.text.strip()
         start = rep_text.find('{')
         end = rep_text.rfind('}')
@@ -1821,6 +1938,68 @@ async def jarvis_vision_navigateur(question_utilisateur=None):
     except Exception as e:
         print(f"[VISION NAVIGATEUR ERROR] {e}")
         return f"Désolé {USER_NAME}, une erreur est survenue lors de l'accès à la vision du navigateur : {e}"
+
+async def _sous_agent_web(query):
+    """Sous-agent : recherche web via SerpAPI (non bloquant)."""
+    try:
+        return await asyncio.wait_for(asyncio.to_thread(recherche_web_serpapi, query), timeout=12)
+    except asyncio.TimeoutError:
+        return None
+    except Exception as e:
+        print(f"[AGENT-WEB] Erreur : {e}")
+        return None
+
+async def _sous_agent_gemini_rapide(query):
+    """Sous-agent : reponse rapide Gemini avec recherche Google integree (sans historique de conversation)."""
+    if not gemini_actif:
+        return None
+    try:
+        response = await asyncio.wait_for(
+            asyncio.to_thread(
+                client.models.generate_content,
+                model=CHOSEN_MODEL,
+                contents=[types.Content(role="user", parts=[types.Part(text=
+                    f"Reponds de maniere concise et a jour (2026) a : {query}"
+                )])],
+                config=types.GenerateContentConfig(
+                    tools=[types.Tool(google_search=types.GoogleSearch())],
+                ),
+            ),
+            timeout=12
+        )
+        return response.text.strip()
+    except asyncio.TimeoutError:
+        return None
+    except Exception as e:
+        print(f"[AGENT-GEMINI] Erreur : {e}")
+        return None
+
+async def agent_recherche_parallele(query):
+    """
+    Agent principal qui delegue a plusieurs sous-agents en parallele (SerpAPI + Gemini)
+    pour repondre plus vite : on garde le premier resultat exploitable recu.
+    """
+    taches = [
+        asyncio.create_task(_sous_agent_web(query)),
+        asyncio.create_task(_sous_agent_gemini_rapide(query)),
+    ]
+    resultat = None
+    try:
+        for coro in asyncio.as_completed(taches, timeout=14):
+            try:
+                res = await coro
+            except Exception:
+                continue
+            if res:
+                resultat = res
+                break
+    except asyncio.TimeoutError:
+        pass
+    finally:
+        for t in taches:
+            if not t.done():
+                t.cancel()
+    return resultat or f"Je n'ai pas réussi à trouver d'information fiable sur {query} pour le moment."
 
 def recherche_web_serpapi(query):
     """Effectue une recherche sur Google via SerpAPI."""
@@ -1956,7 +2135,16 @@ def get_classement_football(ligue=None):
         print(f"[SPORT] Erreur classement : {e}")
         return f"Impossible de recuperer le classement : {e}"
 
+_sport_cache = {}
+_SPORT_CACHE_TTL = 300  # 5 minutes
+
 def get_resultats_sport_gemini(question_sport):
+    _k = question_sport.strip().lower()
+    _now = time.time()
+    if _k in _sport_cache:
+        _ts, _val = _sport_cache[_k]
+        if _now - _ts < _SPORT_CACHE_TTL:
+            return _val
     try:
         response = client.models.generate_content(
             model   = CHOSEN_MODEL,
@@ -1973,7 +2161,9 @@ def get_resultats_sport_gemini(question_sport):
                 )
             )
         )
-        return response.text.strip()
+        _val = response.text.strip()
+        _sport_cache[_k] = (time.time(), _val)
+        return _val
     except Exception as e:
         print(f"[SPORT] Erreur Gemini sport : {e}")
         return "Je n arrive pas a recuperer les resultats sportifs pour le moment."
@@ -4416,7 +4606,7 @@ async def traiter_reponse_ia(texte_utilisateur, mobile_ws=None):
             elif action == "recherche_web":
                 query = data.get("query", "")
                 await parler(f"Je lance une recherche sur internet pour {query}.")
-                result = recherche_web_serpapi(query)
+                result = await agent_recherche_parallele(query)
                 await parler(result)
             elif action == "sport_resultats":
                 equipe = data.get("equipe") or None
@@ -4438,7 +4628,10 @@ async def traiter_reponse_ia(texte_utilisateur, mobile_ws=None):
             elif action == "sport_live":
                 question = data.get("question", "derniers resultats sportifs 2026")
                 await parler("Je recherche les derniers resultats en direct, un instant {USER_NAME}.")
-                result = get_resultats_sport_gemini(question)
+                try:
+                    result = await asyncio.wait_for(asyncio.to_thread(get_resultats_sport_gemini, question), timeout=15)
+                except asyncio.TimeoutError:
+                    result = "La recherche sportive a pris trop de temps, reessaie dans un instant." 
                 await parler(result)
             elif action == "voir_ecran":
                 inst = data.get("instruction", "")
@@ -5103,6 +5296,7 @@ def main():
             x                = _win_x,
             y                = _win_y,
             resizable        = True,
+            fullscreen       = True,
             min_size         = (900, 600),
             background_color = "#0a0a0f",
             icon             = os.path.join(_trouver_dossier_projet("assets"), "jarvis.ico"),
