@@ -308,6 +308,7 @@ _LABELS_CLES_API = {
     "SPOTIFY_MUSIQUE_URI": "Spotify (URI musique)",
     "YOUTUBE_MUSIQUE_URL": "YouTube (URL musique)",
 }
+_OPTIONS_ENV = ["JARVIS_CLAP_REVEIL"]
 _CLES_SECRETES = {
     "GEMINI_API_KEY", "YOUTUBE_API_KEY", "XAI_API_KEY", "SERPAPI_API_KEY",
     "GROQ_API_KEY", "ANTHROPIC_API_KEY",
@@ -333,6 +334,30 @@ def _masquer(valeur):
         return "••••"
     return "••••" + valeur[-4:]
 
+def _etat_options():
+    return {"clap_reveil": _lire_env_brut().get("JARVIS_CLAP_REVEIL", "0") == "1"}
+
+def _sauvegarder_options(opts):
+    try:
+        actuel = _lire_env_brut()
+        actuel["JARVIS_CLAP_REVEIL"] = "1" if opts.get("clap_reveil") else "0"
+        _ecrire_env(actuel)
+        os.environ["JARVIS_CLAP_REVEIL"] = actuel["JARVIS_CLAP_REVEIL"]
+        return {"ok": True, "options": _etat_options()}
+    except Exception as e:
+        return {"ok": False, "message": str(e)}
+
+def _ecrire_env(actuel):
+    with open(_chemin_env(), "w", encoding="utf-8") as f:
+        for cle in _CLES_API_CONFIGURABLES + _OPTIONS_ENV:
+            f.write(f"{cle}={actuel.get(cle, '')}\n")
+
+def _est_local(ws):
+    try:
+        return ws.remote_address[0] in ("127.0.0.1", "::1", "::ffff:127.0.0.1")
+    except Exception:
+        return False
+
 def _etat_cles_api():
     actuel = _lire_env_brut()
     keys = []
@@ -353,7 +378,7 @@ def _etat_cles_api():
         "grok": _cle_valide(os.getenv("XAI_API_KEY")),
         "claude": _cle_valide(os.getenv("ANTHROPIC_API_KEY")),
     }
-    return {"keys": keys, "active": active, "path": _chemin_env()}
+    return {"keys": keys, "active": active, "path": _chemin_env(), "options": _etat_options()}
 
 def _sauvegarder_cles_api(nouvelles_cles):
     """Met a jour le fichier .env avec les cles recues depuis l'interface (valeur vide = effacee)."""
@@ -365,15 +390,12 @@ def _sauvegarder_cles_api(nouvelles_cles):
             if cle in _CLES_API_CONFIGURABLES:
                 actuel[cle] = str(valeur).strip()
 
-        with open(env_path, "w", encoding="utf-8") as f:
-            for cle in _CLES_API_CONFIGURABLES:
-                f.write(f"{cle}={actuel.get(cle, '')}\n")
-
-        for cle in _CLES_API_CONFIGURABLES:
+        _ecrire_env(actuel)
+        for cle in _CLES_API_CONFIGURABLES + _OPTIONS_ENV:
             os.environ[cle] = actuel.get(cle, "")
 
         etat = _etat_cles_api()
-        return {"ok": True, "keys": etat["keys"], "active": etat["active"]}
+        return {"ok": True, "keys": etat["keys"], "active": etat["active"], "options": etat["options"]}
     except Exception as e:
         print(f"[JARVIS] Erreur sauvegarde cles API : {e}")
         return {"ok": False, "message": str(e)}
@@ -925,11 +947,17 @@ async def ws_handler(websocket):
                         else:
                             fut.set_result(data["data"])
                     print(f"[VISION] Frame recue pour ID: {req_id}")
-                elif data.get("type") == "get_keys":
-                    await websocket.send(json.dumps({"action": "keys_state", **_etat_cles_api()}))
-                elif data.get("type") == "save_keys":
-                    resultat = _sauvegarder_cles_api(data.get("keys", {}))
-                    await websocket.send(json.dumps({"action": "keys_saved", **resultat}))
+                elif data.get("type") in ("get_keys", "save_keys", "save_options"):
+                    if not _est_local(websocket):
+                        await websocket.send(json.dumps({"action": "keys_state", "error": "local_only"}))
+                    elif data["type"] == "get_keys":
+                        await websocket.send(json.dumps({"action": "keys_state", **_etat_cles_api()}))
+                    elif data["type"] == "save_keys":
+                        resultat = _sauvegarder_cles_api(data.get("keys", {}))
+                        await websocket.send(json.dumps({"action": "keys_saved", **resultat}))
+                    else:
+                        resultat = _sauvegarder_options(data.get("options", {}))
+                        await websocket.send(json.dumps({"action": "options_saved", **resultat}))
             except Exception as e:
                 print(f"[WEB] Erreur traitement message : {e}")
     except Exception:
@@ -1596,7 +1624,7 @@ def creer_google_doc(titre="Nouveau Document", contenu=""):
         if contenu:
             requests_body = [{"insertText": {"location": {"index": 1}, "text": contenu}}]
             service.documents().batchUpdate(documentId=doc_id, body={"requests": requests_body}).execute()
-        webbrowser.open(f"https://docs.google.com/document/d/{doc_id}/edit", encoding="utf-8")
+        webbrowser.open(f"https://docs.google.com/document/d/{doc_id}/edit")
         return f"Document {titre} cree et ouvert, {USER_NAME}."
     except Exception as e:
         return f"Erreur Google Docs : {e}"
@@ -1614,7 +1642,7 @@ def modifier_google_doc(contenu, doc_id=None):
         end_index = doc["body"]["content"][-1]["endIndex"] - 1
         requests_body = [{"insertText": {"location": {"index": end_index}, "text": "\n" + contenu}}]
         service.documents().batchUpdate(documentId=target_id, body={"requests": requests_body}).execute()
-        webbrowser.open(f"https://docs.google.com/document/d/{target_id}/edit", encoding="utf-8")
+        webbrowser.open(f"https://docs.google.com/document/d/{target_id}/edit")
         return f"Texte ajoute dans le document {dernier_doc_titre}."
     except Exception as e:
         return f"Erreur modification doc : {e}"
@@ -1663,7 +1691,7 @@ def creer_google_sheet(titre="Nouvelle Feuille"):
             return "Google Sheets non disponible."
         sheet    = service.spreadsheets().create(body={"properties": {"title": titre}}).execute()
         sheet_id = sheet["spreadsheetId"]
-        webbrowser.open(f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit", encoding="utf-8")
+        webbrowser.open(f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit")
         return f"Feuille {titre} creee et ouverte."
     except Exception as e:
         return f"Erreur Google Sheets : {e}"
@@ -2190,7 +2218,7 @@ def executer_action_pc(commande):
     if "met de la musique" in cmd or "mets de la musique" in cmd:
         if "youtube" in cmd:
             url = YOUTUBE_MUSIQUE_URL or "https://www.youtube.com/watch?v=Cr8K88UcO0s"
-            webbrowser.open(url, new=2, encoding="utf-8")
+            webbrowser.open(url, new=2)
             time.sleep(5)
             pyautogui.press('f')
             return "C'est parti {USER_NAME}, je lance votre musique sur YouTube."
@@ -2207,7 +2235,7 @@ def executer_action_pc(commande):
         if recherche:
             url = chercher_youtube(recherche)
             if url:
-                webbrowser.open(url, new=2, encoding="utf-8")
+                webbrowser.open(url, new=2)
                 time.sleep(5)
                 pyautogui.press('f')
                 return f"Je lance {recherche} sur YouTube."
@@ -4131,7 +4159,7 @@ async def resoudre_commandes_locales(texte):
     # YouTube music spécifique — doit être AVANT le check Spotify
     if any(k in t for k in ["musique sur youtube", "met de la musique sur youtube", "mets de la musique sur youtube"]):
         url = YOUTUBE_MUSIQUE_URL or "https://www.youtube.com/watch?v=Cr8K88UcO0s"
-        webbrowser.open(url, new=2, encoding="utf-8")
+        webbrowser.open(url, new=2)
         time.sleep(5)
         pyautogui.press('f')
         return "C'est parti {USER_NAME}, je lance votre musique sur YouTube."
@@ -4967,87 +4995,99 @@ def ecouter():
             print(f"Erreur écoute : {e}")
             time.sleep(1)
 
+def _rms_pcm16(data):
+    """RMS d'un buffer PCM 16 bits (remplace audioop, retire de Python 3.13)."""
+    from array import array
+    s = array("h")
+    s.frombytes(data[: len(data) - (len(data) % 2)])
+    if not s:
+        return 0
+    return int((sum(x * x for x in s) / len(s)) ** 0.5)
+
+def _reveil_par_clap():
+    global jarvis_actif, dernier_message
+    jarvis_actif = True
+    dernier_message = time.time()
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(parler("Oui {USER_NAME}, je vous écoute."))
+    except Exception as e:
+        print(f"[CLAP] Erreur reveil : {e}")
+    finally:
+        loop.close()
+
 def monitor_claps():
     if not pyaudio:
         print("[CLAP] PyAudio absent — detection des applaudissements desactivee.")
         return
     try:
-        import audioop
         p = pyaudio.PyAudio()
-        # On ouvre le flux
-        # Utiliser le même micro que la détection vocale
         cfg_clap = _charger_config()
         mic_idx_clap = cfg_clap.get("mic_device_index", None)
         open_kwargs = dict(format=pyaudio.paInt16, channels=1, rate=44100,
-                          input=True, frames_per_buffer=1024)
+                           input=True, frames_per_buffer=1024)
         if mic_idx_clap is not None:
             open_kwargs["input_device_index"] = mic_idx_clap
-        stream = p.open(**open_kwargs, encoding="utf-8")
-        print("[CLAP] Détection des applaudissements activée.")
-        
-        print("[CLAP] Détection des doubles applaudissements activée.")
-        
+        stream = p.open(**open_kwargs)
+        print("[CLAP] Detection des doubles applaudissements prete.")
+
         last_clap_time = 0
-        
+        recent = []  # bruit de fond recent (rms)
+
         while True:
             try:
                 data = stream.read(1024, exception_on_overflow=False)
-                rms  = audioop.rms(data, 2)
-                
-                # ON IGNORE LE CLAP UNIQUEMENT SI LE MODE IRON MAN EST ÉTEINT OU SI JARVIS PARLE
-                if not MODE_IRON_MAN or is_speaking or is_thinking:
+                rms = _rms_pcm16(data)
+                fond = (sum(recent) / len(recent)) if recent else 0
+                recent.append(rms)
+                if len(recent) > 20:
+                    recent.pop(0)
+
+                reveil_actif = os.getenv("JARVIS_CLAP_REVEIL", "0") == "1"
+                if is_speaking or is_thinking or not (MODE_IRON_MAN or reveil_actif):
                     last_clap_time = 0
                     continue
 
-                if rms > CLAP_THRESHOLD:
-                    current_time = time.time()
-                    diff = current_time - last_clap_time
-                    
-                    if 0.1 < diff < 0.8:
-                        global VIDEO_LANCEE
-                        print(f"\n[CLAP] !!! DOUBLE CLAP DÉTECTÉ !!!")
-                        entity_id = PIECES_LUMIERES.get("salon", "light.salon")
-                        
-                        # On vérifie l'état actuel
-                        etat_actuel = ha_get_etat(entity_id)
-                        
-                        if etat_actuel != "on":
-                            # ON ALLUME
-                            print(f"[CLAP] Action : ALLUMER")
-                            ha_lumiere(entity_id, "on")
-                            
-                            if not VIDEO_LANCEE:
-                                print(f"[CLAP] Lancement initial de la vidéo...")
-                                webbrowser.open("https://www.youtube.com/watch?v=KU5V5WZVcVE", encoding="utf-8")
-                                VIDEO_LANCEE = True
-                                def seq():
-                                    time.sleep(5)
-                                    pyautogui.press('f')
-                                threading.Thread(target=seq, daemon=True).start()
-                            else:
-                                print(f"[CLAP] Reprise de la vidéo (Play)...")
-                                pyautogui.press('k')
+                # Un clap = pic net, bien au-dessus du bruit de fond
+                if rms > CLAP_THRESHOLD and rms > fond * 4:
+                    now = time.time()
+                    diff = now - last_clap_time
+                    if 0.12 < diff < 0.8:
+                        print("[CLAP] Double clap detecte")
+                        last_clap_time = 0
+                        if MODE_IRON_MAN:
+                            _action_clap_iron_man()
                         else:
-                            # ON ÉTEINT
-                            print(f"[CLAP] Action : ÉTEINDRE")
-                            ha_lumiere(entity_id, "off")
-                            if VIDEO_LANCEE:
-                                print(f"[CLAP] Mise en pause de la vidéo...")
-                                pyautogui.press('k')
-                            
-                        # Gros debounce après une action réussie
-                        time.sleep(3.0)
-                        last_clap_time = 0 # Reset
+                            _reveil_par_clap()
+                        time.sleep(2.0)
+                        recent.clear()
                     else:
-                        # C'est peut-être le premier clap
-                        last_clap_time = current_time
-            except Exception as e:
-                # Si erreur de lecture (ex: micro débranché), on attend et on continue
+                        last_clap_time = now
+            except Exception:
                 time.sleep(0.5)
                 continue
-
     except Exception as e:
-        print(f"[CLAP] Erreur fatale détection claps : {e}")
+        print(f"[CLAP] Erreur fatale detection claps : {e}")
+
+def _action_clap_iron_man():
+    """Comportement historique du double clap en mode Iron Man (lumiere + video)."""
+    global VIDEO_LANCEE
+    entity_id = PIECES_LUMIERES.get("salon", "light.salon")
+    if ha_get_etat(entity_id) != "on":
+        ha_lumiere(entity_id, "on")
+        if not VIDEO_LANCEE:
+            webbrowser.open("https://www.youtube.com/watch?v=KU5V5WZVcVE")
+            VIDEO_LANCEE = True
+            def seq():
+                time.sleep(5)
+                pyautogui.press('f')
+            threading.Thread(target=seq, daemon=True).start()
+        else:
+            pyautogui.press('k')
+    else:
+        ha_lumiere(entity_id, "off")
+        if VIDEO_LANCEE:
+            pyautogui.press('k')
 
 def start_ia():
     threading.Thread(target=monitor_claps, daemon=True).start()
@@ -5326,7 +5366,7 @@ def main():
 def _ouvrir_dans_navigateur(url, frontend_process):
     print("[JARVIS] Ouverture dans le navigateur par defaut...")
     try:
-        webbrowser.open(url, encoding="utf-8")
+        webbrowser.open(url)
     except Exception:
         pass
 
